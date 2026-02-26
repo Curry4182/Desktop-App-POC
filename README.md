@@ -30,6 +30,14 @@ AI 기반 범용 PC 어시스턴트 데스크톱 앱입니다.
 - **Build**: Vite 6
 - **Test**: Vitest
 
+## 개발 환경 요구사항
+
+| 항목 | 버전 |
+|------|------|
+| Node.js | v18.19+ (권장 v22) |
+| npm | v9+ |
+| OS | macOS / Windows 10+ |
+
 ---
 
 ## 아키텍처
@@ -63,7 +71,8 @@ Vue (Renderer Process)
 design-assistant/
 ├── electron/
 │   ├── main.ts          # Electron 메인 프로세스, IPC 핸들러
-│   └── preload.ts       # contextBridge → window.electronAPI
+│   ├── preload.js       # contextBridge → window.electronAPI (CJS, 런타임 로드)
+│   └── preload.ts       # preload 타입 정의 (타입체크 전용)
 │
 ├── src/                 # Vue 3 (Renderer)
 │   ├── App.vue
@@ -141,7 +150,15 @@ npm run dev
 ```
 
 Vite 개발 서버(port 5173)가 시작되고 Electron 창이 자동으로 열립니다.
-**브라우저에서 localhost:5173을 열지 말고 Electron 창에서 테스트하세요.**
+
+> **주의**: 브라우저에서 `localhost:5173`을 직접 열면 mock 응답만 표시됩니다.
+> 반드시 자동으로 열리는 **Electron 창**에서 테스트하세요.
+
+터미널에 아래 로그가 보이면 정상입니다.
+```
+[Main] 환경 변수 로드 완료
+[Main] 에이전트 로드 성공
+```
 
 ### 4. 타입 체크 / 테스트
 
@@ -207,6 +224,22 @@ LLM이 설치 목록을 해석하여 사용자 질문과 관련된 소프트웨�
 - `"진단 패널 열어줘"` / `"닫아줘"`
 - `"채팅 초기화해줘"`
 - `"대화 내용 저장해줘"`
+
+---
+
+## 트러블슈팅
+
+**Q. 채팅 입력 시 `[Mock] 입력: ...` 응답만 나온다**
+→ Electron 창이 아닌 브라우저에서 테스트하고 있을 가능성이 높습니다. `npm run dev` 실행 후 자동으로 열리는 Electron 창을 사용하세요.
+
+**Q. 터미널에 `ERR_UNKNOWN_FILE_EXTENSION ".ts"` 오류가 나온다**
+→ `NODE_OPTIONS='--import tsx'`가 적용되지 않은 경우입니다. Node.js v18.19 미만이면 지원되지 않습니다. Node.js v22 사용을 권장합니다.
+
+**Q. 터미널에 `Most NODE_OPTIONs are not supported in packaged apps` 경고가 나온다**
+→ 개발 모드에서 발생하는 Electron 노이즈입니다. 기능에 영향을 주지 않으므로 무시해도 됩니다.
+
+**Q. `[Main] 에이전트 로드 실패` 로그가 나온다**
+→ `.env` 파일이 없거나 API 키가 잘못 설정된 경우입니다. `.env.example`을 복사해 API 키를 입력하세요.
 
 ---
 
