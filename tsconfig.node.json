@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "lib": ["ESNext"],
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["agent/**/*", "tests/**/*", "vite.config.ts", "vitest.config.ts"]
+}
