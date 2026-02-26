@@ -4,7 +4,7 @@
   "description": "CAD Design Assistant with PC Diagnostics - POC",
   "main": "electron/main.ts",
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS='--require tsx/cjs' concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "cross-env NODE_OPTIONS='--import tsx' concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build && electron-builder",
     "test": "vitest run",
     "test:watch": "vitest",
