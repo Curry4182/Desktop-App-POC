@@ -82,6 +82,86 @@ export const wikiSearchTool = tool(
 
 // ─── Tool 2: wiki_get_summary — single article fetch (truncated) ───
 
+const DETAIL_WORD_LIMIT = 300
+
+// ─── Tool 3: wiki_get_detail — section-level deep read ───
+
+export const wikiGetDetailTool = tool(
+  async ({ title, section }) => {
+    try {
+      if (!section) {
+        // Return section list so LLM can pick which to read
+        const url = new URL('https://en.wikipedia.org/w/api.php')
+        url.searchParams.set('action', 'parse')
+        url.searchParams.set('page', title)
+        url.searchParams.set('prop', 'sections')
+        url.searchParams.set('format', 'json')
+        url.searchParams.set('origin', '*')
+
+        const res = await fetch(url.toString())
+        const data = await res.json() as {
+          parse?: { sections: Array<{ index: string; line: string; level: string }> }
+        }
+
+        if (!data.parse?.sections) {
+          return JSON.stringify({ error: `No sections found for "${title}"` })
+        }
+
+        const sections = data.parse.sections
+          .filter(s => s.level === '2' || s.level === '3')
+          .map(s => ({ index: s.index, title: s.line }))
+
+        return JSON.stringify({
+          article: title,
+          sections,
+          instruction: 'Call wiki_get_detail again with a section index to read that section.',
+        })
+      }
+
+      // Fetch specific section content
+      const url = new URL('https://en.wikipedia.org/w/api.php')
+      url.searchParams.set('action', 'parse')
+      url.searchParams.set('page', title)
+      url.searchParams.set('section', section)
+      url.searchParams.set('prop', 'text')
+      url.searchParams.set('format', 'json')
+      url.searchParams.set('origin', '*')
+
+      const res = await fetch(url.toString())
+      const data = await res.json() as {
+        parse?: { title: string; text: { '*': string } }
+      }
+
+      if (!data.parse?.text) {
+        return JSON.stringify({ error: `Failed to fetch section ${section} of "${title}"` })
+      }
+
+      const rawHtml = data.parse.text['*']
+      const text = stripHtml(rawHtml).replace(/\s+/g, ' ').trim()
+      const truncated = truncateWords(text, DETAIL_WORD_LIMIT)
+
+      return JSON.stringify({
+        article: title,
+        section,
+        content: truncated,
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`,
+      })
+    } catch {
+      return JSON.stringify({ error: `Failed to fetch detail for "${title}"` })
+    }
+  },
+  {
+    name: 'wiki_get_detail',
+    description: 'Read a specific section of a Wikipedia article for deeper information. Call without section to get section list first, then call again with section index to read content. Use when wiki_get_summary is not enough.',
+    schema: z.object({
+      title: z.string().describe('Wikipedia article title'),
+      section: z.string().optional().describe('Section index number (e.g., "1", "3"). Omit to get section list.'),
+    }),
+  }
+)
+
+// ─── Tool 2: wiki_get_summary — single article fetch (truncated) ───
+
 export const wikiGetSummaryTool = tool(
   async ({ title }) => {
     const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
