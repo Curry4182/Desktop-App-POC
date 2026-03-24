@@ -1,7 +1,7 @@
 {
   "name": "design-assistant",
   "version": "0.1.0",
-  "description": "CAD Design Assistant with PC Diagnostics - POC",
+  "description": "CAD Design Assistant v2 — Multi-Agent with Supervisor + ReAct",
   "main": "electron/main.ts",
   "scripts": {
     "dev": "cross-env NODE_OPTIONS='--import tsx' concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
