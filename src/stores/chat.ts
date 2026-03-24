@@ -6,148 +6,208 @@ interface Message {
   content: string
   timestamp: number
   diagnosticResults?: unknown
+  steps?: Array<{ step: string; summary: string }>
+  isStreaming?: boolean
 }
 
-interface AgentResult {
-  response: string
-  route: string
-  uiAction: { action: string; params?: Record<string, unknown> } | null
-  diagnosticResults: unknown
+interface ConfirmRequest {
+  id: string
+  action: string
+  description: string
+  scriptId?: string
 }
 
+interface ClarifyRequest {
+  id: string
+  question: string
+  options: Array<{ label: string; value: string }>
+}
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([
     {
       role: 'assistant',
-      content: '안녕하세요! Design Assistant입니다.\n\nCAD 설계 질문, PC 진단, UI 제어 등 무엇이든 물어보세요.\n\n예시:\n- "CATIA가 설치되어 있는지 확인해줘"\n- "Part Design에서 Pad 사용법 알려줘"\n- "진단 패널 열어줘"',
+      content: '안녕하세요! Design Assistant입니다.\n\nCAD 설계 질문, PC 진단, 정보 검색 등 무엇이든 물어보세요.',
       timestamp: Date.now(),
     },
   ])
   const isLoading = ref(false)
-  const lastRoute = ref<string | null>(null)
+  const lastAgentName = ref<string | null>(null)
   const lastDiagnosticResult = ref<unknown>(null)
   const showDiagnosticPanel = ref(false)
+  const searchEnabled = ref(true)
+  const lastError = ref<{ message: string; errorType: string } | null>(null)
+  const lastUserMessage = ref<string | null>(null)
 
-  /**
-   * 메시지 전송 → IPC → LangGraph Agent
-   */
-  async function sendMessage(text: string) {
+  // HITL state
+  const pendingConfirm = ref<ConfirmRequest | null>(null)
+  const pendingClarify = ref<ClarifyRequest | null>(null)
+
+  let listenersSetup = false
+
+  function setupListeners() {
+    if (listenersSetup || !window.electronAPI) return
+    listenersSetup = true
+
+    window.electronAPI.onStreamToken((data) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.isStreaming) {
+        lastMsg.content += data.content
+      }
+    })
+
+    window.electronAPI.onStreamStep((data) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.isStreaming) {
+        if (!lastMsg.steps) lastMsg.steps = []
+        lastMsg.steps.push(data)
+      }
+    })
+
+    window.electronAPI.onStreamDone((data) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.isStreaming) {
+        lastMsg.content = data.response
+        lastMsg.isStreaming = false
+        lastMsg.diagnosticResults = data.diagnosticResults
+      }
+      lastAgentName.value = data.agentName
+      if (data.diagnosticResults) {
+        lastDiagnosticResult.value = data.diagnosticResults
+        showDiagnosticPanel.value = true
+      }
+      isLoading.value = false
+      lastError.value = null
+    })
+
+    window.electronAPI.onStreamError((data) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.isStreaming) {
+        lastMsg.content = `오류가 발생했습니다: ${data.message}`
+        lastMsg.isStreaming = false
+      }
+      isLoading.value = false
+      lastError.value = data
+    })
+
+    window.electronAPI.onConfirmRequest((data) => {
+      pendingConfirm.value = data
+    })
+
+    window.electronAPI.onClarifyRequest((data) => {
+      pendingClarify.value = data
+    })
+  }
+
+  function sendMessage(text: string) {
+    setupListeners()
+
+    lastUserMessage.value = text
+    lastError.value = null
+
     messages.value.push({
       role: 'user',
       content: text,
       timestamp: Date.now(),
     })
 
+    // Create streaming placeholder
+    messages.value.push({
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true,
+      steps: [],
+    })
+
     isLoading.value = true
 
-    try {
-      let result: AgentResult
+    if (window.electronAPI) {
+      window.electronAPI.sendMessage(text, searchEnabled.value)
+    } else {
+      // Mock for dev without Electron
+      setTimeout(() => {
+        const lastMsg = messages.value[messages.value.length - 1]
+        if (lastMsg && lastMsg.isStreaming) {
+          lastMsg.content = `[Mock] "${text}" — Electron 환경에서 실제 AI 응답이 표시됩니다.`
+          lastMsg.isStreaming = false
+        }
+        isLoading.value = false
+      }, 800)
+    }
+  }
 
-      if (window.electronAPI) {
-        // Electron 환경: IPC 사용 (streaming rewrite in Task 12)
-        result = await mockResponse(text)
-      } else {
-        // 브라우저 환경(개발): mock
-        result = await mockResponse(text)
+  function retryLastMessage() {
+    if (lastUserMessage.value) {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        messages.value.pop()
       }
-
-      lastRoute.value = result.route
-
-      if (result.diagnosticResults) {
-        lastDiagnosticResult.value = result.diagnosticResults
-        showDiagnosticPanel.value = true
+      const prevMsg = messages.value[messages.value.length - 1]
+      if (prevMsg && prevMsg.role === 'user') {
+        messages.value.pop()
       }
+      sendMessage(lastUserMessage.value)
+    }
+  }
 
-      messages.value.push({
-        role: 'assistant',
-        content: result.response || '응답을 받지 못했습니다.',
-        timestamp: Date.now(),
-        diagnosticResults: result.diagnosticResults ?? null,
+  function dismissError() {
+    lastError.value = null
+  }
+
+  function respondToConfirm(confirmed: boolean) {
+    if (pendingConfirm.value && window.electronAPI) {
+      window.electronAPI.sendConfirmResponse({
+        id: pendingConfirm.value.id,
+        confirmed,
       })
+      pendingConfirm.value = null
+    }
+  }
 
-      // UI 액션 처리
-      if (result.uiAction) {
-        executeUIAction(result.uiAction)
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      messages.value.push({
-        role: 'assistant',
-        content: `오류가 발생했습니다: ${message}`,
-        timestamp: Date.now(),
+  function respondToClarify(selected: string[], freeText?: string) {
+    if (pendingClarify.value && window.electronAPI) {
+      window.electronAPI.sendClarifyResponse({
+        id: pendingClarify.value.id,
+        selected,
+        freeText,
       })
-    } finally {
-      isLoading.value = false
+      pendingClarify.value = null
     }
   }
 
-  /**
-   * UI 액션 실행 (IPC에서도 호출 가능)
-   */
-  function executeUIAction(action: { action: string; params?: Record<string, unknown> }) {
-    if (!action?.action) return
-
-    switch (action.action) {
-      case 'openDiagnosticPanel':
-        showDiagnosticPanel.value = true
-        break
-      case 'closeDiagnosticPanel':
-        showDiagnosticPanel.value = false
-        break
-      case 'startDiagnostic':
-        sendMessage('PC 진단을 실행해줘')
-        break
-      case 'clearChat':
-        messages.value = []
-        break
-      case 'openSettings':
-        // TODO: 설정 패널 (POC 생략)
-        console.log('[UI] 설정 패널 열기 요청')
-        break
-      case 'exportReport':
-        exportReport()
-        break
+  function toggleSearch(enabled: boolean) {
+    searchEnabled.value = enabled
+    if (window.electronAPI) {
+      window.electronAPI.toggleSearch(enabled)
     }
   }
 
-  /**
-   * 보고서 내보내기
-   */
-  function exportReport() {
-    const report = messages.value
-      .map((m) => `[${m.role.toUpperCase()}] ${m.content}`)
-      .join('\n\n---\n\n')
-
-    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `report_${new Date().toISOString().slice(0, 10)}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  /**
-   * 개발용 Mock (Electron 없이 브라우저에서 테스트)
-   */
-  async function mockResponse(text: string): Promise<AgentResult> {
-    await new Promise((r) => setTimeout(r, 800))
-    return {
-      response: `[Mock] 입력: "${text}"\n\nElectron 환경에서 실제 AI 응답이 표시됩니다.`,
-      route: 'chat',
-      uiAction: null,
-      diagnosticResults: null,
-    }
+  function clearChat() {
+    messages.value = [{
+      role: 'assistant',
+      content: '안녕하세요! Design Assistant입니다.\n\nCAD 설계 질문, PC 진단, 정보 검색 등 무엇이든 물어보세요.',
+      timestamp: Date.now(),
+    }]
+    lastError.value = null
   }
 
   return {
     messages,
     isLoading,
-    lastRoute,
+    lastAgentName,
     lastDiagnosticResult,
     showDiagnosticPanel,
+    searchEnabled,
+    lastError,
+    pendingConfirm,
+    pendingClarify,
     sendMessage,
-    executeUIAction,
+    retryLastMessage,
+    dismissError,
+    respondToConfirm,
+    respondToClarify,
+    toggleSearch,
+    clearChat,
   }
 })
