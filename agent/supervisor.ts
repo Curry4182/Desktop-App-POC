@@ -104,22 +104,26 @@ export async function classifyRoute(
 
     // Fallback: programmatic ambiguity detection if LLM didn't flag it
     if (!parsed.clarify) {
-      // Always detect ambiguous pronouns (even with history — "그 음식" needs clarification)
       const ambiguousPronouns = /(?:그것|그거|저거|저것|그\s?음식|그\s?문제|그\s?사람|이것|이거)/.test(userMessage)
-      // Short vague queries without history
       const vaguePhrases = !hasHistory && /(?:어떻게|문제점|해결|알려줘|뭘까|뭐야)\s*[?？]?\s*$/.test(userMessage)
       const tooShort = !hasHistory && userMessage.replace(/[?？!！.\s]/g, '').length < 6
 
       if (ambiguousPronouns || (vaguePhrases && tooShort)) {
-        interrupt({
+        const userChoice = interrupt({
           type: 'clarify' as const,
           question: ambiguousPronouns
             ? '어떤 대상에 대해 물어보시는 건가요?'
             : '조금 더 구체적으로 알려주시겠어요?',
-          options: parsed.clarifyOptions || [
+          options: [
             { label: '직접 입력', value: '' },
           ],
         })
+        // Resume: re-classify with user's clarification
+        return classifyRoute(
+          `${userMessage} (보충: ${userChoice})`,
+          searchEnabled,
+          hasHistory,
+        )
       }
     }
 
