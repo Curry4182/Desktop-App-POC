@@ -98,6 +98,41 @@ ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
         case 'step':
           win.webContents.send('agent:stream:step', { category: (evt as any).category, summary: evt.summary })
           break
+        case 'interrupt': {
+          const data = (evt as any).interruptData
+          if (data?.type === 'clarify') {
+            win.webContents.send('agent:clarify', {
+              id: Date.now().toString(),
+              question: data.question,
+              options: data.options || [],
+            })
+            // 60-second timeout
+            setTimeout(() => {
+              if (!win.isDestroyed()) {
+                win.webContents.send('agent:stream:error', {
+                  message: '응답 시간이 초과되었습니다.',
+                  errorType: 'timeout',
+                })
+              }
+            }, 60000)
+          } else if (data?.type === 'confirm') {
+            win.webContents.send('agent:confirm', {
+              id: Date.now().toString(),
+              action: data.action,
+              description: data.description,
+              scriptId: data.scriptId,
+            })
+            setTimeout(() => {
+              if (!win.isDestroyed()) {
+                win.webContents.send('agent:stream:error', {
+                  message: '사용자 확인 시간이 초과되었습니다.',
+                  errorType: 'timeout',
+                })
+              }
+            }, 60000)
+          }
+          break
+        }
         case 'done': {
           const { AIMessage } = await import('@langchain/core/messages')
           conversationManager.addMessage(new AIMessage(evt.response))

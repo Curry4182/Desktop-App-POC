@@ -216,6 +216,22 @@ export async function* streamMessage(
     }
   }
 
+  // Check if graph was interrupted (HITL: clarification or confirmation)
+  try {
+    const state = await app.getState({ configurable: { thread_id: threadId } })
+    if (state.next && state.next.length > 0 && state.tasks) {
+      // Graph is paused at an interrupt
+      for (const task of state.tasks) {
+        if (task.interrupts && task.interrupts.length > 0) {
+          for (const intr of task.interrupts) {
+            yield { type: 'interrupt' as const, interruptData: intr.value }
+          }
+          return // Don't yield done — waiting for user response
+        }
+      }
+    }
+  } catch { /* no state or no interrupt */ }
+
   yield {
     type: 'done' as const,
     response: finalResponse,
