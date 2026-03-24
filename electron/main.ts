@@ -78,11 +78,15 @@ ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
 
     const history = conversationManager.getMessages()
 
-    // Use real streaming via streamMessage generator
+    // Use unique thread_id per message to avoid checkpoint state conflicts
+    const threadId = `msg-${Date.now()}`
+    // Store for potential HITL resume
+    ;(win as any).__lastThreadId = threadId
+
     for await (const evt of agentModule.streamMessage(
       message,
       history.slice(0, -1),
-      'main-thread',
+      threadId,
       searchEnabled ?? true,
     )) {
       if (!win || win.isDestroyed()) break
@@ -165,7 +169,8 @@ ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
 async function resumeAndStream(win: BrowserWindow, resumeValue: unknown) {
   if (!agentModule) return
   try {
-    for await (const evt of agentModule.resumeGraph('main-thread', resumeValue)) {
+    const threadId = (win as any).__lastThreadId || 'main-thread'
+    for await (const evt of agentModule.resumeGraph(threadId, resumeValue)) {
       if (win.isDestroyed()) break
       switch (evt.type) {
         case 'token':
