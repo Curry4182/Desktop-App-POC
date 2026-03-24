@@ -90,6 +90,8 @@ const SUPERVISOR_REACT_PROMPT = `당신은 CAD 설계 어시스턴트의 Supervi
 
 ### 3단계: generate_answer 호출
 - 직접 답변하지 마세요. 반드시 generate_answer를 사용하세요
+- generate_answer는 반드시 research를 1회 이상 호출한 후에만 사용 가능
+- research 없이 generate_answer를 호출하면 안 됩니다
 
 ## ask_user 사용 예시
 
@@ -108,11 +110,23 @@ const SUPERVISOR_REACT_PROMPT = `당신은 CAD 설계 어시스턴트의 Supervi
 - 같은 주제를 다시 조사하지 마세요
 - 이전 답변을 기반으로 후속 질문에 답변하세요
 
+## ask_user 후 반드시 research
+- ask_user로 사용자 선택을 받은 후, 그 결과를 반영하여 반드시 research 호출
+- ask_user → generate_answer (금지! research를 건너뜀)
+- ask_user → research → generate_answer (올바른 흐름)
+
+예시:
+ask_user("어떤 삼성?") → 사용자: "삼성전자"
+→ research("삼성전자") ← 반드시 검색!
+→ generate_answer(질문, 검색 결과)
+
 ## 금지 사항
+- research 없이 generate_answer 호출 금지
 - 불필요한 보충 질문 금지 (명확한 질문에는 바로 조사)
 - 조건을 건너뛰거나 무시하지 마세요
 - 일반적인 나열형 답변을 만들지 마세요
-- 검색 결과에 없는 내용을 추측으로 보충하지 마세요`
+- 검색 결과에 없는 내용을 추측으로 보충하지 마세요
+- 자체 지식으로 답변하지 마세요 — 반드시 research 도구로 찾은 자료만 사용`
 
 export function createSupervisorReactAgent() {
   const llm = createLLM({ temperature: 0.3 })
