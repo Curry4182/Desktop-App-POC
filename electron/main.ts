@@ -108,21 +108,21 @@ ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
           break
         case 'interrupt': {
           const data = (evt as any).interruptData
+          const sendTimeout = () => {
+            if (!win.isDestroyed()) {
+              win.webContents.send('agent:stream:error', {
+                message: '응답 시간이 초과되었습니다.',
+                errorType: 'timeout',
+              })
+            }
+          }
           if (data?.type === 'clarify') {
             win.webContents.send('agent:clarify', {
               id: Date.now().toString(),
               question: data.question,
               options: data.options || [],
             })
-            // 60-second timeout
-            setTimeout(() => {
-              if (!win.isDestroyed()) {
-                win.webContents.send('agent:stream:error', {
-                  message: '응답 시간이 초과되었습니다.',
-                  errorType: 'timeout',
-                })
-              }
-            }, 60000)
+            ;(win as any).__hitlTimeout = setTimeout(sendTimeout, 60000)
           } else if (data?.type === 'confirm') {
             win.webContents.send('agent:confirm', {
               id: Date.now().toString(),
@@ -130,14 +130,7 @@ ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
               description: data.description,
               scriptId: data.scriptId,
             })
-            setTimeout(() => {
-              if (!win.isDestroyed()) {
-                win.webContents.send('agent:stream:error', {
-                  message: '사용자 확인 시간이 초과되었습니다.',
-                  errorType: 'timeout',
-                })
-              }
-            }, 60000)
+            ;(win as any).__hitlTimeout = setTimeout(sendTimeout, 60000)
           }
           break
         }
@@ -219,11 +212,39 @@ async function resumeAndStream(win: BrowserWindow, resumeValue: unknown) {
         case 'token':
           win.webContents.send('agent:stream:token', { content: evt.content })
           break
+        case 'interrupt': {
+          const data = (evt as any).interruptData
+          if (data?.type === 'clarify') {
+            win.webContents.send('agent:clarify', {
+              id: Date.now().toString(),
+              question: data.question,
+              options: data.options || [],
+            })
+          } else if (data?.type === 'confirm') {
+            win.webContents.send('agent:confirm', {
+              id: Date.now().toString(),
+              action: data.action,
+              description: data.description,
+              scriptId: data.scriptId,
+            })
+          }
+          ;(win as any).__hitlTimeout = setTimeout(() => {
+            if (!win.isDestroyed()) {
+              win.webContents.send('agent:stream:error', {
+                message: '응답 시간이 초과되었습니다.',
+                errorType: 'timeout',
+              })
+            }
+          }, 60000)
+          break
+        }
         case 'done':
           win.webContents.send('agent:stream:done', {
             response: evt.response,
-            agentName: evt.agentName,
+            agentName: (evt as any).agentName || 'chat',
             diagnosticResults: evt.diagnosticResults ?? null,
+            sources: (evt as any).sources ?? [],
+            tokenUsage: (evt as any).tokenUsage ?? {},
           })
           break
       }
@@ -239,12 +260,20 @@ async function resumeAndStream(win: BrowserWindow, resumeValue: unknown) {
 ipcMain.on('agent:confirm:response', (event, response) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win) return
+  if ((win as any).__hitlTimeout) {
+    clearTimeout((win as any).__hitlTimeout)
+    ;(win as any).__hitlTimeout = null
+  }
   resumeAndStream(win, response.confirmed)
 })
 
 ipcMain.on('agent:clarify:response', (event, response) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win) return
+  if ((win as any).__hitlTimeout) {
+    clearTimeout((win as any).__hitlTimeout)
+    ;(win as any).__hitlTimeout = null
+  }
   const combined = [...(response.selected || []), response.freeText].filter(Boolean).join(', ')
   resumeAndStream(win, combined)
 })
