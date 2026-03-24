@@ -15,11 +15,12 @@
         </button>
       </div>
 
-      <!-- Processing steps (collapsible, hierarchical) -->
+      <!-- Processing steps: current status + expandable history -->
       <div v-if="message.steps && message.steps.length > 0" class="process-steps">
-        <div class="step-toggle" @click="showSteps = !showSteps">
+        <div class="step-current" @click="showSteps = !showSteps">
           <span class="toggle-arrow">{{ showSteps ? '▾' : '▸' }}</span>
-          처리 과정
+          <span class="current-label">{{ lastStep.summary }}</span>
+          <span v-if="message.isStreaming" class="step-spinner"></span>
         </div>
         <div v-if="showSteps" class="steps-tree">
           <div
@@ -65,7 +66,12 @@ const props = defineProps({
 })
 
 const showDetails = ref(false)
-const showSteps = ref(true)
+const showSteps = ref(false)
+
+const lastStep = computed(() => {
+  const steps = props.message.steps || []
+  return steps[steps.length - 1] || { summary: '' }
+})
 const selectedSource = ref(null)
 
 function toggleDetails() {
@@ -194,17 +200,28 @@ const formattedContent = computed(() => {
   border-top: 1px solid #f0f0f0;
 }
 
-.step-toggle {
+.step-current {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   cursor: pointer;
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
   user-select: none;
 }
-.step-toggle:hover { color: #64748b; }
-.toggle-arrow { font-size: 10px; width: 12px; }
+.step-current:hover { color: #475569; }
+.toggle-arrow { font-size: 10px; width: 12px; color: #94a3b8; }
+.current-label { flex: 1; }
+
+.step-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #e2e8f0;
+  border-top-color: #64748b;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .steps-tree {
   margin-top: 6px;
