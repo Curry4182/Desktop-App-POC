@@ -1,357 +1,176 @@
-import { StateGraph, END, MemorySaver, Command } from '@langchain/langgraph'
+import { Annotation, MessagesAnnotation, StateGraph, MemorySaver, START, Command } from '@langchain/langgraph'
 import { HumanMessage } from '@langchain/core/messages'
-import type { BaseMessage } from '@langchain/core/messages'
-import { SupervisorAnnotation } from './state.js'
-import { classifyRoute, createSupervisorReactAgent } from './supervisor.js'
-import { runChatAgent } from './agents/chat-agent.js'
-import { createPCFixAgent } from './agents/pc-fix-agent.js'
-import type { AgentName } from './types.js'
+import { randomUUID } from 'crypto'
+import { supervisorNode } from './supervisor.js'
+import { researchNode } from './agents/research-agent.js'
+import { chatNode } from './agents/chat-agent.js'
+import { pcFixNode } from './agents/pc-fix-agent.js'
+import { createTracer } from './observability.js'
+import 'dotenv/config'
 
-// ─── Langfuse Observability ───
-let langfuseHandler: any = null
-async function getLangfuseHandler(sessionId: string) {
-  if (!process.env.LANGFUSE_SECRET_KEY) return null
-  try {
-    const { CallbackHandler } = await import('langfuse-langchain')
-    return new CallbackHandler({
-      secretKey: process.env.LANGFUSE_SECRET_KEY,
-      publicKey: process.env.LANGFUSE_PUBLIC_KEY,
-      baseUrl: process.env.LANGFUSE_BASE_URL || 'https://cloud.langfuse.com',
-      sessionId,
-    })
-  } catch {
-    return null
-  }
-}
+// ─── State Schema ───
 
-// ─── Nodes ───
+export const GraphAnnotation = Annotation.Root({
+  ...MessagesAnnotation.spec,
+  searchEnabled: Annotation<boolean>({
+    reducer: (_prev: boolean, next: boolean) => next,
+    default: () => true,
+  }),
+  conversationSummary: Annotation<string>({
+    reducer: (_prev: string, next: string) => next,
+    default: () => '',
+  }),
+})
 
-async function classifierNode(state: typeof SupervisorAnnotation.State) {
-  const lastMessage = state.messages[state.messages.length - 1]
-  const agentName = await classifyRoute(
-    String(lastMessage.content),
-    state.searchEnabled,
-  )
-  return { agentName }
-}
-
-async function chatNode(state: typeof SupervisorAnnotation.State) {
-  const response = await runChatAgent(state.messages)
-  return { response }
-}
-
-async function researchNode(state: typeof SupervisorAnnotation.State) {
-  // Supervisor ReAct agent: generates multiple research questions,
-  // calls research tool for each, then synthesizes final answer
-  const agent = createSupervisorReactAgent()
-  const result = await agent.invoke({ messages: state.messages })
-  const lastMsg = result.messages[result.messages.length - 1]
-  return { response: String(lastMsg.content) }
-}
-
-async function pcFixNode(state: typeof SupervisorAnnotation.State) {
-  const agent = createPCFixAgent()
-  const result = await agent.invoke({ messages: state.messages })
-  const lastMsg = result.messages[result.messages.length - 1]
-  return { response: String(lastMsg.content) }
-}
-
-// ─── Routing ───
-
-function routeToAgent(state: typeof SupervisorAnnotation.State): string {
-  switch (state.agentName) {
-    case 'research': return 'research'
-    case 'pc_fix': return 'pc_fix'
-    default: return 'chat'
-  }
-}
-
-// ─── Graph (compiled once, reused) ───
+// ─── Build Graph ───
 
 const checkpointer = new MemorySaver()
 
-type CompiledGraphType = ReturnType<typeof buildGraph>
-let compiledGraph: CompiledGraphType | null = null
-
 function buildGraph() {
-  const graph = new StateGraph(SupervisorAnnotation)
-    .addNode('classifier', classifierNode)
-    .addNode('chat', chatNode)
-    .addNode('research', researchNode)
-    .addNode('pc_fix', pcFixNode)
-
-  graph
-    .setEntryPoint('classifier')
-    .addConditionalEdges('classifier', routeToAgent)
-    .addEdge('chat', END)
-    .addEdge('research', END)
-    .addEdge('pc_fix', END)
+  const graph = new StateGraph(GraphAnnotation)
+    .addNode('supervisor', supervisorNode, {
+      ends: ['research', 'pc_fix', 'chat', '__end__'],
+    })
+    .addNode('research', researchNode, {
+      ends: ['supervisor'],
+    })
+    .addNode('pc_fix', pcFixNode, {
+      ends: ['supervisor'],
+    })
+    .addNode('chat', chatNode, {
+      ends: ['supervisor'],
+    })
+    .addEdge(START, 'supervisor')
 
   return graph.compile({ checkpointer })
 }
+
+let compiledGraph: ReturnType<typeof buildGraph> | null = null
 
 function getGraph() {
   if (!compiledGraph) compiledGraph = buildGraph()
   return compiledGraph
 }
 
-// ─── Streaming entry point ───
+// ─── Session Management ───
 
-export async function* streamMessage(
-  userMessage: string,
-  history: BaseMessage[] = [],
-  threadId: string = 'default',
-  searchEnabled: boolean = true,
-) {
-  const app = getGraph()
+let currentThreadId = `session-${randomUUID()}`
 
-  // Langfuse tracing (if configured)
-  const handler = await getLangfuseHandler(threadId)
-  const callbacks = handler ? [handler] : []
-
-  const stream = app.streamEvents(
-    {
-      messages: [...history, new HumanMessage(userMessage)],
-      searchEnabled,
-    },
-    {
-      configurable: { thread_id: threadId },
-      version: 'v2',
-      callbacks,
-    },
-  )
-
-  let finalResponse = ''
-  let agentName: AgentName = 'chat'
-  let activeNode = ''
-  let isResearchNode = false // research node doesn't stream — captures final response at end
-  const tokenUsage: Record<string, { input: number; output: number }> = {}
-  const collectedSources: Array<{
-    title: string; content: string; sourceType: string;
-    url?: string; documentId?: string; metadata?: Record<string, unknown>
-  }> = []
-
-  for await (const event of stream) {
-    // Track which node is currently executing
-    if (event.event === 'on_chain_start' && event.name) {
-      const stepMap: Record<string, { summary: string; category: string }> = {
-        classifier: { summary: '메시지 분석 중', category: 'system' },
-        research: { summary: '자료조사 에이전트', category: 'system' },
-        pc_fix: { summary: 'PC 진단 에이전트', category: 'system' },
-        chat: { summary: '응답 생성 중', category: 'system' },
-      }
-      if (stepMap[event.name]) {
-        activeNode = event.name
-        if (event.name !== 'classifier') agentName = event.name as AgentName
-        if (event.name === 'research') isResearchNode = true
-        yield { type: 'step' as const, ...stepMap[event.name] }
-      }
-    }
-
-    // Track token usage from all LLM calls
-    if (event.event === 'on_chat_model_end') {
-      try {
-        const output = event.data?.output
-        const usage = output?.usage_metadata || output?.response_metadata?.usage
-        if (usage) {
-          const node = activeNode || 'unknown'
-          if (!tokenUsage[node]) tokenUsage[node] = { input: 0, output: 0 }
-          tokenUsage[node].input += usage.input_tokens || usage.prompt_tokens || 0
-          tokenUsage[node].output += usage.output_tokens || usage.completion_tokens || 0
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Capture LLM tool_calls to show research questions and answer phase
-    if (event.event === 'on_chat_model_end' && activeNode === 'research') {
-      try {
-        const output = event.data?.output
-        const toolCalls = output?.tool_calls || output?.additional_kwargs?.tool_calls || []
-        for (const tc of toolCalls) {
-          if (tc.name === 'research' && tc.args?.question) {
-            yield { type: 'step' as const, category: 'research', summary: tc.args.question }
-          }
-          if (tc.name === 'generate_answer') {
-            yield { type: 'step' as const, category: 'answer', summary: '답변 생성 중' }
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Capture tool results — extract search keywords + found documents
-    if (event.event === 'on_tool_end') {
-      try {
-        const output = event.data?.output
-        const text = typeof output === 'string' ? output : output?.content || ''
-        const parsed = JSON.parse(text)
-
-        if (parsed.searchLog) {
-          const { keywords, foundDocuments } = parsed.searchLog
-          if (keywords && keywords.length > 0) {
-            yield { type: 'step' as const, category: 'search', summary: `검색: ${keywords.map((k: string) => `"${k}"`).join(', ')}` }
-          }
-          if (foundDocuments && foundDocuments.length > 0) {
-            const titles = foundDocuments.map((d: { title: string }) => d.title).join(', ')
-            yield { type: 'step' as const, category: 'search', summary: `${foundDocuments.length}개 문서: ${titles}` }
-            for (const doc of foundDocuments) {
-              if (!collectedSources.some(s => s.title === doc.title)) {
-                collectedSources.push(doc)
-              }
-            }
-          }
-        }
-
-        if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
-          for (const src of parsed.sources) {
-            if (!collectedSources.some(s => s.documentId === src.documentId || s.title === src.title)) {
-              collectedSources.push(src)
-            }
-          }
-        }
-      } catch { /* non-JSON tool output, ignore */ }
-    }
-
-    // Capture research node's final response when it completes
-    if (event.event === 'on_chain_end' && event.name === 'research' && isResearchNode) {
-      try {
-        const output = event.data?.output
-        const response = output?.response
-        if (typeof response === 'string' && response) {
-          finalResponse = response
-          yield { type: 'token' as const, content: response }
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Stream LLM tokens — only for chat/pc_fix (NOT research)
-    if (!isResearchNode && event.event === 'on_chat_model_stream' && event.data?.chunk) {
-      const tags: string[] = event.tags || []
-      const isClassifierLLM = tags.some(t => t.includes('classifier')) || activeNode === 'classifier'
-
-      if (!isClassifierLLM) {
-        const content = event.data.chunk.content
-        if (typeof content === 'string' && content) {
-          finalResponse += content
-          yield { type: 'token' as const, content }
-        }
-      }
-    }
-  }
-
-  // Check if graph was interrupted (HITL: clarification or confirmation)
-  try {
-    const state = await app.getState({ configurable: { thread_id: threadId } })
-    if (state.next && state.next.length > 0 && state.tasks) {
-      // Graph is paused at an interrupt
-      for (const task of state.tasks) {
-        if (task.interrupts && task.interrupts.length > 0) {
-          for (const intr of task.interrupts) {
-            yield { type: 'interrupt' as const, interruptData: intr.value }
-          }
-          return // Don't yield done — waiting for user response
-        }
-      }
-    }
-  } catch { /* no state or no interrupt */ }
-
-  yield {
-    type: 'done' as const,
-    response: finalResponse,
-    agentName,
-    diagnosticResults: null,
-    sources: collectedSources,
-    tokenUsage,
-  }
+export function getThreadId() {
+  return currentThreadId
 }
 
-// ─── Resume after interrupt (HITL) ───
+export function resetSession() {
+  currentThreadId = `session-${randomUUID()}`
+}
 
-export async function* resumeGraph(
-  threadId: string,
-  resumeValue: unknown,
+// ─── Streaming Entry Point ───
+
+export async function* streamGraph(
+  userMessage: string,
+  searchEnabled: boolean = true,
 ) {
-  const app = getGraph()
+  const graph = getGraph()
+  const tracer = await createTracer()
+  const callbacks = tracer ? [tracer] : []
 
-  // Read current state to get agentName before resuming
-  let agentName: AgentName = 'chat'
-  try {
-    const currentState = await app.getState({ configurable: { thread_id: threadId } })
-    agentName = (currentState.values as any)?.agentName || 'chat'
-  } catch { /* fallback to chat */ }
-
-  const stream = app.streamEvents(
-    new Command({ resume: resumeValue }),
-    { configurable: { thread_id: threadId }, version: 'v2' },
-  )
-
-  let finalResponse = ''
-  const isResearch = agentName === 'research'
-
-  for await (const event of stream) {
-    // Capture research node response
-    if (isResearch && event.event === 'on_chain_end' && event.name === 'research') {
-      try {
-        const response = event.data?.output?.response
-        if (typeof response === 'string' && response) {
-          finalResponse = response
-          yield { type: 'token' as const, content: response }
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Stream chat/pc_fix tokens
-    if (!isResearch && event.event === 'on_chat_model_stream' && event.data?.chunk) {
-      const content = event.data.chunk.content
-      if (typeof content === 'string' && content) {
-        finalResponse += content
-        yield { type: 'token' as const, content }
-      }
-    }
+  const config = {
+    configurable: { thread_id: currentThreadId },
+    callbacks,
   }
 
-  // Check for further interrupts after resume
-  try {
-    const state = await app.getState({ configurable: { thread_id: threadId } })
-    if (state.next && state.next.length > 0 && state.tasks) {
-      for (const task of state.tasks) {
-        if (task.interrupts && task.interrupts.length > 0) {
-          for (const intr of task.interrupts) {
-            yield { type: 'interrupt' as const, interruptData: intr.value }
+  const input = {
+    messages: [new HumanMessage(userMessage)],
+    searchEnabled,
+  }
+
+  const stream = await graph.stream(input, {
+    ...config,
+    streamMode: ['messages', 'custom', 'updates'] as const,
+  })
+
+  for await (const chunk of stream) {
+    const [mode, data] = chunk as [string, any]
+
+    switch (mode) {
+      case 'messages': {
+        const [msgChunk, metadata] = data
+        if (msgChunk._getType() === 'ai' && msgChunk.content) {
+          if (metadata?.langgraph_node !== 'supervisor') {
+            yield {
+              type: 'token' as const,
+              content: String(msgChunk.content),
+              node: metadata?.langgraph_node || 'unknown',
+            }
+          }
+        }
+        break
+      }
+      case 'custom': {
+        yield { type: 'custom' as const, data }
+        break
+      }
+      case 'updates': {
+        if (data && '__interrupt__' in data) {
+          for (const intr of data.__interrupt__) {
+            yield { type: 'interrupt' as const, data: intr.value }
           }
           return
         }
+        break
       }
     }
-  } catch { /* no interrupt */ }
-
-  yield {
-    type: 'done' as const,
-    response: finalResponse,
-    agentName,
-    diagnosticResults: null,
-    sources: [] as any[],
-    tokenUsage: {} as Record<string, { input: number; output: number }>,
   }
+
+  yield { type: 'done' as const }
 }
 
-// ─── Non-streaming fallback (for testing) ───
+// ─── Resume After Interrupt ───
 
-export async function processMessage(
-  userMessage: string,
-  history: BaseMessage[] = [],
-  threadId: string = 'default',
-  searchEnabled: boolean = true,
-) {
-  let response = ''
-  let agentName: AgentName = 'chat'
+export async function* resumeGraph(resumeValue: unknown) {
+  const graph = getGraph()
 
-  for await (const event of streamMessage(userMessage, history, threadId, searchEnabled)) {
-    if (event.type === 'token') response += event.content
-    if (event.type === 'done') {
-      response = event.response
-      agentName = event.agentName
+  const config = {
+    configurable: { thread_id: currentThreadId },
+  }
+
+  const stream = await graph.stream(new Command({ resume: resumeValue }), {
+    ...config,
+    streamMode: ['messages', 'custom', 'updates'] as const,
+  })
+
+  for await (const chunk of stream) {
+    const [mode, data] = chunk as [string, any]
+
+    switch (mode) {
+      case 'messages': {
+        const [msgChunk, metadata] = data
+        if (msgChunk._getType() === 'ai' && msgChunk.content) {
+          if (metadata?.langgraph_node !== 'supervisor') {
+            yield {
+              type: 'token' as const,
+              content: String(msgChunk.content),
+              node: metadata?.langgraph_node || 'unknown',
+            }
+          }
+        }
+        break
+      }
+      case 'custom': {
+        yield { type: 'custom' as const, data }
+        break
+      }
+      case 'updates': {
+        if (data && '__interrupt__' in data) {
+          for (const intr of data.__interrupt__) {
+            yield { type: 'interrupt' as const, data: intr.value }
+          }
+          return
+        }
+        break
+      }
     }
   }
 
-  return { response, agentName, diagnosticResults: null, messages: history }
+  yield { type: 'done' as const }
 }
