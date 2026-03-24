@@ -8,16 +8,10 @@ const isDev = !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
 let agentModule: typeof import('../agent/graph.js') | null = null
-let conversationModule: typeof import('../agent/history/conversation-manager.js') | null = null
-let conversationManager: InstanceType<typeof import('../agent/history/conversation-manager.js').ConversationManager> | null = null
 
 async function loadAgentModule() {
   if (!agentModule) {
     agentModule = await import('../agent/graph.js')
-  }
-  if (!conversationModule) {
-    conversationModule = await import('../agent/history/conversation-manager.js')
-    conversationManager = new conversationModule.ConversationManager()
   }
 }
 
@@ -65,194 +59,119 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
-// ─── Reset conversation on renderer load ───
+// ─── Reset ───
 
 ipcMain.on('agent:reset', () => {
-  if (conversationManager) {
-    conversationManager.reset()
-  }
+  agentModule?.resetSession()
 })
 
 // ─── Streaming Message Handler ───
 
 ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
   const win = BrowserWindow.fromWebContents(event.sender)
-  if (!win || !agentModule || !conversationManager) return
+  if (!win || !agentModule) return
 
   try {
-    const { HumanMessage } = await import('@langchain/core/messages')
-    conversationManager.addMessage(new HumanMessage(message))
-    await conversationManager.summarizeIfNeeded()
-
-    const history = conversationManager.getMessages()
-
-    // Use unique thread_id per message to avoid checkpoint state conflicts
-    const threadId = `msg-${Date.now()}`
-    // Store for potential HITL resume
-    ;(win as any).__lastThreadId = threadId
-
-    for await (const evt of agentModule.streamMessage(
-      message,
-      history.slice(0, -1),
-      threadId,
-      searchEnabled ?? true,
-    )) {
-      if (!win || win.isDestroyed()) break
+    for await (const evt of agentModule.streamGraph(message, searchEnabled ?? true)) {
+      if (win.isDestroyed()) break
 
       switch (evt.type) {
         case 'token':
-          win.webContents.send('agent:stream:token', { content: evt.content })
+          win.webContents.send('stream:token', { content: evt.content, node: evt.node })
           break
-        case 'step':
-          win.webContents.send('agent:stream:step', { category: (evt as any).category, summary: evt.summary })
+        case 'custom':
+          win.webContents.send('stream:custom', evt.data)
           break
         case 'interrupt': {
-          const data = (evt as any).interruptData
-          const sendTimeout = () => {
-            if (!win.isDestroyed()) {
-              win.webContents.send('agent:stream:error', {
-                message: '응답 시간이 초과되었습니다.',
-                errorType: 'timeout',
-              })
-            }
-          }
+          const data = evt.data as any
           if (data?.type === 'clarify') {
-            win.webContents.send('agent:clarify', {
+            win.webContents.send('stream:interrupt', {
+              interruptType: 'clarify',
               id: Date.now().toString(),
               question: data.question,
               options: data.options || [],
             })
-            ;(win as any).__hitlTimeout = setTimeout(sendTimeout, 60000)
           } else if (data?.type === 'confirm') {
-            win.webContents.send('agent:confirm', {
+            win.webContents.send('stream:interrupt', {
+              interruptType: 'confirm',
               id: Date.now().toString(),
               action: data.action,
               description: data.description,
               scriptId: data.scriptId,
             })
-            ;(win as any).__hitlTimeout = setTimeout(sendTimeout, 60000)
           }
-          break
+          const timeout = setTimeout(() => {
+            if (!win.isDestroyed()) {
+              win.webContents.send('stream:error', {
+                message: '응답 시간이 초과되었습니다.',
+              })
+            }
+          }, 60000)
+          ;(win as any).__hitlTimeout = timeout
+          return
         }
-        case 'done': {
-          const { AIMessage } = await import('@langchain/core/messages')
-          conversationManager.addMessage(new AIMessage(evt.response))
-          win.webContents.send('agent:stream:done', {
-            response: evt.response,
-            agentName: evt.agentName,
-            diagnosticResults: evt.diagnosticResults ?? null,
-            sources: (evt as any).sources ?? [],
-            tokenUsage: (evt as any).tokenUsage ?? {},
-          })
+        case 'done':
+          win.webContents.send('stream:done', {})
           break
-        }
       }
     }
   } catch (err) {
-    const error = err as any
-    // Handle GraphInterrupt — send confirm/clarify request to renderer
-    if (error?.name === 'GraphInterrupt' || error?.interrupts) {
-      const interrupts = error.interrupts || error.value || []
-      const interruptData = Array.isArray(interrupts) ? interrupts[0]?.value : interrupts
-
-      if (interruptData?.type === 'confirm') {
-        win.webContents.send('agent:confirm', {
-          id: Date.now().toString(),
-          action: interruptData.action,
-          description: interruptData.description,
-          scriptId: interruptData.scriptId,
-        })
-        // 60-second timeout
-        setTimeout(() => {
-          if (!win.isDestroyed()) {
-            win.webContents.send('agent:stream:error', {
-              message: '사용자 확인 시간이 초과되었습니다.',
-              errorType: 'timeout',
-            })
-          }
-        }, 60000)
-        return
-      }
-
-      if (interruptData?.type === 'clarify') {
-        win.webContents.send('agent:clarify', {
-          id: Date.now().toString(),
-          question: interruptData.question,
-          options: interruptData.options || [],
-        })
-        setTimeout(() => {
-          if (!win.isDestroyed()) {
-            win.webContents.send('agent:stream:error', {
-              message: '응답 시간이 초과되었습니다.',
-              errorType: 'timeout',
-            })
-          }
-        }, 60000)
-        return
-      }
+    if (!win.isDestroyed()) {
+      const message = err instanceof Error ? err.message : String(err)
+      win.webContents.send('stream:error', { message })
     }
-
-    const errorMessage = err instanceof Error ? err.message : String(err)
-    win.webContents.send('agent:stream:error', {
-      message: errorMessage,
-      errorType: 'unknown',
-    })
   }
 })
 
-// ─── HITL Handlers — resume graph after interrupt ───
+// ─── HITL Resume ───
 
 async function resumeAndStream(win: BrowserWindow, resumeValue: unknown) {
   if (!agentModule) return
   try {
-    const threadId = (win as any).__lastThreadId || 'main-thread'
-    for await (const evt of agentModule.resumeGraph(threadId, resumeValue)) {
+    for await (const evt of agentModule.resumeGraph(resumeValue)) {
       if (win.isDestroyed()) break
       switch (evt.type) {
         case 'token':
-          win.webContents.send('agent:stream:token', { content: evt.content })
+          win.webContents.send('stream:token', { content: evt.content, node: evt.node })
+          break
+        case 'custom':
+          win.webContents.send('stream:custom', evt.data)
           break
         case 'interrupt': {
-          const data = (evt as any).interruptData
+          const data = evt.data as any
           if (data?.type === 'clarify') {
-            win.webContents.send('agent:clarify', {
+            win.webContents.send('stream:interrupt', {
+              interruptType: 'clarify',
               id: Date.now().toString(),
               question: data.question,
               options: data.options || [],
             })
           } else if (data?.type === 'confirm') {
-            win.webContents.send('agent:confirm', {
+            win.webContents.send('stream:interrupt', {
+              interruptType: 'confirm',
               id: Date.now().toString(),
               action: data.action,
               description: data.description,
               scriptId: data.scriptId,
             })
           }
-          ;(win as any).__hitlTimeout = setTimeout(() => {
+          const timeout = setTimeout(() => {
             if (!win.isDestroyed()) {
-              win.webContents.send('agent:stream:error', {
-                message: '응답 시간이 초과되었습니다.',
-                errorType: 'timeout',
-              })
+              win.webContents.send('stream:error', { message: '응답 시간이 초과되었습니다.' })
             }
           }, 60000)
-          break
+          ;(win as any).__hitlTimeout = timeout
+          return
         }
         case 'done':
-          win.webContents.send('agent:stream:done', {
-            response: evt.response,
-            agentName: (evt as any).agentName || 'chat',
-            diagnosticResults: evt.diagnosticResults ?? null,
-            sources: (evt as any).sources ?? [],
-            tokenUsage: (evt as any).tokenUsage ?? {},
-          })
+          win.webContents.send('stream:done', {})
           break
       }
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
     if (!win.isDestroyed()) {
-      win.webContents.send('agent:stream:error', { message: msg, errorType: 'unknown' })
+      const message = err instanceof Error ? err.message : String(err)
+      win.webContents.send('stream:error', { message })
     }
   }
 }
@@ -276,10 +195,4 @@ ipcMain.on('agent:clarify:response', (event, response) => {
   }
   const combined = [...(response.selected || []), response.freeText].filter(Boolean).join(', ')
   resumeAndStream(win, combined)
-})
-
-// ─── Search Toggle ───
-
-ipcMain.on('agent:search:toggle', (_event, { enabled }) => {
-  console.log('[Search] Toggle:', enabled)
 })
