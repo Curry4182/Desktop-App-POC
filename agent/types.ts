@@ -1,5 +1,3 @@
-import type { BaseMessage } from '@langchain/core/messages'
-
 // ──────────────────────────────────────────────
 // 시스템 정보 (systeminformation 기반)
 // ──────────────────────────────────────────────
@@ -121,33 +119,17 @@ export interface ScriptRegistry {
   scripts: ScriptEntry[]
 }
 
-// ─── Streaming ───
-export type StreamEventType = 'token' | 'step' | 'done' | 'error'
+// ─── Agent Routing ───
+export type AgentName = 'research' | 'pc_fix' | 'chat'
 
-export interface StreamToken {
-  type: 'token'
-  content: string
-}
+export type AgentRoute = AgentName | '__end__'
 
-export interface StreamStep {
-  type: 'step'
-  step: 'thinking' | 'action' | 'observation'
-  summary: string
-}
-
-export interface StreamDone {
-  type: 'done'
-  response: string
-  diagnosticResults?: DiagnosticResult | null
-}
-
-export interface StreamError {
-  type: 'error'
-  message: string
-  errorType: 'api_error' | 'timeout' | 'script_error' | 'unknown'
-}
-
-export type StreamEvent = StreamToken | StreamStep | StreamDone | StreamError
+// ─── Custom Stream Events ───
+export type CustomStreamEvent =
+  | { type: 'search_start'; query: string }
+  | { type: 'search_result'; titles: string[]; count: number }
+  | { type: 'source_found'; title: string; url: string; snippet: string }
+  | { type: 'research_step'; step: string }
 
 // ─── Human-in-the-Loop ───
 export interface ConfirmRequest {
@@ -179,32 +161,14 @@ export interface ClarifyResponse {
   freeText?: string
 }
 
-// ─── Research Result ───
+// ─── Research Source ───
 export interface ResearchSource {
   title: string
   content: string
-  sourceType: 'wikipedia' | 'internal_api' | 'other'
-  url?: string               // Wikipedia 등 웹 소스용
-  documentId?: string         // 자체 API 문서 ID용
+  sourceType: 'wikipedia' | 'other'
+  url?: string
+  documentId?: string
   author?: string
   lastUpdated?: string
-  metadata?: Record<string, unknown>  // 자체 API 메타데이터 확장용
-}
-
-export interface ResearchResult {
-  query: string
-  sources: ResearchSource[]
-  summary: string
-}
-
-// ─── Agent State ───
-export type AgentName = 'research' | 'pc_fix' | 'chat'
-
-export interface SupervisorState {
-  messages: BaseMessage[]
-  agentName: AgentName | null
-  response: string | null
-  diagnosticResults: DiagnosticResult | null
-  searchEnabled: boolean
-  summary: string | null
+  metadata?: Record<string, unknown>
 }
