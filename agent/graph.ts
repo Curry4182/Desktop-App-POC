@@ -132,6 +132,9 @@ export async function* streamMessage(
           if (tc.name === 'research' && tc.args?.question) {
             yield { type: 'step' as const, step: 'action' as const, summary: `📝 조사 질문: "${tc.args.question}"` }
           }
+          if (tc.name === 'generate_answer') {
+            yield { type: 'step' as const, step: 'action' as const, summary: `✍️ 답변을 생성하고 있습니다...` }
+          }
         }
       } catch { /* ignore */ }
     }
