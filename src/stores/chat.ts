@@ -14,10 +14,8 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
-  diagnosticResults?: unknown
-  steps?: Array<{ step?: string; category?: string; summary: string }>
+  steps?: Array<{ type: string; [key: string]: any }>
   sources?: ResearchSource[]
-  tokenUsage?: Record<string, { input: number; output: number }>
   isStreaming?: boolean
 }
 
@@ -43,14 +41,10 @@ export const useChatStore = defineStore('chat', () => {
     },
   ])
   const isLoading = ref(false)
-  const lastAgentName = ref<string | null>(null)
-  const lastDiagnosticResult = ref<unknown>(null)
-  const showDiagnosticPanel = ref(false)
   const searchEnabled = ref(true)
-  const lastError = ref<{ message: string; errorType: string } | null>(null)
+  const lastError = ref<{ message: string } | null>(null)
   const lastUserMessage = ref<string | null>(null)
 
-  // HITL state
   const pendingConfirm = ref<ConfirmRequest | null>(null)
   const pendingClarify = ref<ClarifyRequest | null>(null)
 
@@ -60,7 +54,6 @@ export const useChatStore = defineStore('chat', () => {
     if (listenersSetup || !window.electronAPI) return
     listenersSetup = true
 
-    // Reset backend conversation history on fresh renderer load
     window.electronAPI.resetConversation()
 
     window.electronAPI.onStreamToken((data) => {
@@ -70,31 +63,30 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
-    window.electronAPI.onStreamStep((data) => {
+    window.electronAPI.onStreamCustom((data) => {
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.isStreaming) {
         if (!lastMsg.steps) lastMsg.steps = []
         lastMsg.steps.push(data)
+
+        if (data.type === 'source_found' && data.title && data.url) {
+          if (!lastMsg.sources) lastMsg.sources = []
+          if (!lastMsg.sources.some((s: ResearchSource) => s.title === data.title)) {
+            lastMsg.sources.push({
+              title: data.title,
+              content: data.snippet || '',
+              sourceType: 'wikipedia',
+              url: data.url,
+            })
+          }
+        }
       }
     })
 
-    window.electronAPI.onStreamDone((data) => {
+    window.electronAPI.onStreamDone(() => {
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.isStreaming) {
-        lastMsg.content = data.response
         lastMsg.isStreaming = false
-        lastMsg.diagnosticResults = data.diagnosticResults
-        if (data.sources && data.sources.length > 0) {
-          lastMsg.sources = data.sources
-        }
-        if (data.tokenUsage && Object.keys(data.tokenUsage).length > 0) {
-          lastMsg.tokenUsage = data.tokenUsage
-        }
-      }
-      lastAgentName.value = data.agentName
-      if (data.diagnosticResults) {
-        lastDiagnosticResult.value = data.diagnosticResults
-        showDiagnosticPanel.value = true
       }
       isLoading.value = false
       lastError.value = null
@@ -110,12 +102,21 @@ export const useChatStore = defineStore('chat', () => {
       lastError.value = data
     })
 
-    window.electronAPI.onConfirmRequest((data) => {
-      pendingConfirm.value = data
-    })
-
-    window.electronAPI.onClarifyRequest((data) => {
-      pendingClarify.value = data
+    window.electronAPI.onStreamInterrupt((data) => {
+      if (data.interruptType === 'confirm') {
+        pendingConfirm.value = {
+          id: data.id,
+          action: data.action,
+          description: data.description,
+          scriptId: data.scriptId,
+        }
+      } else if (data.interruptType === 'clarify') {
+        pendingClarify.value = {
+          id: data.id,
+          question: data.question,
+          options: data.options || [],
+        }
+      }
     })
   }
 
@@ -131,7 +132,6 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: Date.now(),
     })
 
-    // Create streaming placeholder
     messages.value.push({
       role: 'assistant',
       content: '',
@@ -145,7 +145,6 @@ export const useChatStore = defineStore('chat', () => {
     if (window.electronAPI) {
       window.electronAPI.sendMessage(text, searchEnabled.value)
     } else {
-      // Mock for dev without Electron
       setTimeout(() => {
         const lastMsg = messages.value[messages.value.length - 1]
         if (lastMsg && lastMsg.isStreaming) {
@@ -160,13 +159,9 @@ export const useChatStore = defineStore('chat', () => {
   function retryLastMessage() {
     if (lastUserMessage.value) {
       const lastMsg = messages.value[messages.value.length - 1]
-      if (lastMsg && lastMsg.role === 'assistant') {
-        messages.value.pop()
-      }
+      if (lastMsg && lastMsg.role === 'assistant') messages.value.pop()
       const prevMsg = messages.value[messages.value.length - 1]
-      if (prevMsg && prevMsg.role === 'user') {
-        messages.value.pop()
-      }
+      if (prevMsg && prevMsg.role === 'user') messages.value.pop()
       sendMessage(lastUserMessage.value)
     }
   }
@@ -187,7 +182,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function respondToClarify(selected: string[], freeText?: string) {
     if (pendingClarify.value && window.electronAPI) {
-      // Convert reactive proxy to plain values for IPC structured clone
       window.electronAPI.sendClarifyResponse({
         id: String(pendingClarify.value.id),
         selected: [...selected],
@@ -199,9 +193,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function toggleSearch(enabled: boolean) {
     searchEnabled.value = enabled
-    if (window.electronAPI) {
-      window.electronAPI.toggleSearch(enabled)
-    }
   }
 
   function clearChat() {
@@ -216,9 +207,6 @@ export const useChatStore = defineStore('chat', () => {
   return {
     messages,
     isLoading,
-    lastAgentName,
-    lastDiagnosticResult,
-    showDiagnosticPanel,
     searchEnabled,
     lastError,
     pendingConfirm,
