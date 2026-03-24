@@ -1,51 +1,45 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
-import { pathToFileURL } from 'url'
+import { fileURLToPath } from 'url'
+import 'dotenv/config'
 
-// 개발 환경 감지
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const isDev = !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
-let agentModule: { processMessage: (msg: string, history: unknown[]) => Promise<unknown> } | null = null
+let agentModule: typeof import('../agent/graph.js') | null = null
+let conversationModule: typeof import('../agent/history/conversation-manager.js') | null = null
+let conversationManager: InstanceType<typeof import('../agent/history/conversation-manager.js').ConversationManager> | null = null
 
-/**
- * LangGraph Agent 동적 임포트 (TypeScript ESM 모듈)
- */
-async function loadAgent() {
-  if (agentModule) return agentModule
-  try {
-    const agentPath = path.join(__dirname, '../agent/graph.ts')
-    const agentUrl = pathToFileURL(agentPath).href
-    agentModule = await import(agentUrl) as typeof agentModule
-    console.log('[Main] 에이전트 로드 성공')
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('[Main] 에이전트 로드 실패:', message)
-    agentModule = null
+async function loadAgentModule() {
+  if (!agentModule) {
+    agentModule = await import('../agent/graph.js')
   }
-  return agentModule
+  if (!conversationModule) {
+    conversationModule = await import('../agent/history/conversation-manager.js')
+    conversationManager = new conversationModule.ConversationManager()
+  }
 }
 
-/**
- * BrowserWindow 생성
- */
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // ESM agent 모듈 로드를 위해 필요
+      sandbox: false,
     },
-    titleBarStyle: 'default',
-    show: false, // 로딩 완료 후 표시
   })
 
-  // 개발: Vite dev server, 프로덕션: 빌드된 index.html
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show()
+  })
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
@@ -53,76 +47,13 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
-  })
-
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 }
 
-/**
- * IPC 핸들러: 사용자 메시지 → LangGraph → 응답
- */
-ipcMain.handle('agent:message', async (_event, { message, history }: { message: string; history: unknown[] }) => {
-  console.log(`[IPC] 메시지 수신: "${message.slice(0, 50)}..."`)
-
-  const agent = await loadAgent()
-
-  if (!agent) {
-    return {
-      response: 'Agent를 로드할 수 없습니다. .env 파일의 API 키를 확인하세요.',
-      route: 'error',
-      uiAction: null,
-      diagnosticResults: null,
-    }
-  }
-
-  try {
-    const result = await agent.processMessage(message, history) as {
-      response: string
-      route: string
-      uiAction: unknown
-      diagnosticResults: unknown
-    }
-    console.log(`[IPC] 응답 라우트: ${result.route}`)
-
-    // UI 액션이 있으면 renderer에 별도로 전송
-    if (result.uiAction && mainWindow) {
-      mainWindow.webContents.send('ui:action', result.uiAction)
-    }
-
-    return result
-  } catch (err) {
-    const message_ = err instanceof Error ? err.message : String(err)
-    console.error('[IPC] 에이전트 오류:', message_)
-    return {
-      response: `처리 중 오류가 발생했습니다: ${message_}`,
-      route: 'error',
-      uiAction: null,
-      diagnosticResults: null,
-    }
-  }
-})
-
-/**
- * App 이벤트
- */
 app.whenReady().then(async () => {
-  // .env 로드
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const dotenv = require('dotenv') as { config: (opts: { path: string }) => void }
-    dotenv.config({ path: path.join(__dirname, '../.env') })
-    console.log('[Main] 환경 변수 로드 완료')
-  } catch {
-    console.warn('[Main] dotenv 로드 실패')
-  }
-
-  // Agent 사전 로드 (첫 메시지 지연 방지)
-  await loadAgent()
-
+  await loadAgentModule()
   createWindow()
 })
 
@@ -132,4 +63,144 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
+})
+
+// ─── Streaming Message Handler ───
+
+ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || !agentModule || !conversationManager) return
+
+  try {
+    const { HumanMessage } = await import('@langchain/core/messages')
+    conversationManager.addMessage(new HumanMessage(message))
+    await conversationManager.summarizeIfNeeded()
+
+    const history = conversationManager.getMessages()
+
+    // Use real streaming via streamMessage generator
+    for await (const evt of agentModule.streamMessage(
+      message,
+      history.slice(0, -1),
+      'main-thread',
+      searchEnabled ?? true,
+    )) {
+      if (!win || win.isDestroyed()) break
+
+      switch (evt.type) {
+        case 'token':
+          win.webContents.send('agent:stream:token', { content: evt.content })
+          break
+        case 'step':
+          win.webContents.send('agent:stream:step', { step: evt.step, summary: evt.summary })
+          break
+        case 'done': {
+          const { AIMessage } = await import('@langchain/core/messages')
+          conversationManager.addMessage(new AIMessage(evt.response))
+          win.webContents.send('agent:stream:done', {
+            response: evt.response,
+            agentName: evt.agentName,
+            diagnosticResults: evt.diagnosticResults ?? null,
+          })
+          break
+        }
+      }
+    }
+  } catch (err) {
+    const error = err as any
+    // Handle GraphInterrupt — send confirm/clarify request to renderer
+    if (error?.name === 'GraphInterrupt' || error?.interrupts) {
+      const interrupts = error.interrupts || error.value || []
+      const interruptData = Array.isArray(interrupts) ? interrupts[0]?.value : interrupts
+
+      if (interruptData?.type === 'confirm') {
+        win.webContents.send('agent:confirm', {
+          id: Date.now().toString(),
+          action: interruptData.action,
+          description: interruptData.description,
+          scriptId: interruptData.scriptId,
+        })
+        // 60-second timeout
+        setTimeout(() => {
+          if (!win.isDestroyed()) {
+            win.webContents.send('agent:stream:error', {
+              message: '사용자 확인 시간이 초과되었습니다.',
+              errorType: 'timeout',
+            })
+          }
+        }, 60000)
+        return
+      }
+
+      if (interruptData?.type === 'clarify') {
+        win.webContents.send('agent:clarify', {
+          id: Date.now().toString(),
+          question: interruptData.question,
+          options: interruptData.options || [],
+        })
+        setTimeout(() => {
+          if (!win.isDestroyed()) {
+            win.webContents.send('agent:stream:error', {
+              message: '응답 시간이 초과되었습니다.',
+              errorType: 'timeout',
+            })
+          }
+        }, 60000)
+        return
+      }
+    }
+
+    const errorMessage = err instanceof Error ? err.message : String(err)
+    win.webContents.send('agent:stream:error', {
+      message: errorMessage,
+      errorType: 'unknown',
+    })
+  }
+})
+
+// ─── HITL Handlers — resume graph after interrupt ───
+
+async function resumeAndStream(win: BrowserWindow, resumeValue: unknown) {
+  if (!agentModule) return
+  try {
+    for await (const evt of agentModule.resumeGraph('main-thread', resumeValue)) {
+      if (win.isDestroyed()) break
+      switch (evt.type) {
+        case 'token':
+          win.webContents.send('agent:stream:token', { content: evt.content })
+          break
+        case 'done':
+          win.webContents.send('agent:stream:done', {
+            response: evt.response,
+            agentName: evt.agentName,
+            diagnosticResults: evt.diagnosticResults ?? null,
+          })
+          break
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!win.isDestroyed()) {
+      win.webContents.send('agent:stream:error', { message: msg, errorType: 'unknown' })
+    }
+  }
+}
+
+ipcMain.on('agent:confirm:response', (event, response) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  resumeAndStream(win, response.confirmed)
+})
+
+ipcMain.on('agent:clarify:response', (event, response) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  const combined = [...(response.selected || []), response.freeText].filter(Boolean).join(', ')
+  resumeAndStream(win, combined)
+})
+
+// ─── Search Toggle ───
+
+ipcMain.on('agent:search:toggle', (_event, { enabled }) => {
+  console.log('[Search] Toggle:', enabled)
 })

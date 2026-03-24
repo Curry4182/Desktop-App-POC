@@ -15,14 +15,6 @@ interface AgentResult {
   diagnosticResults: unknown
 }
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      sendMessage: (text: string) => Promise<AgentResult>
-      onUIAction: (cb: (action: { action: string }) => void) => void
-    }
-  }
-}
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([
@@ -53,8 +45,8 @@ export const useChatStore = defineStore('chat', () => {
       let result: AgentResult
 
       if (window.electronAPI) {
-        // Electron 환경: IPC 사용
-        result = await window.electronAPI.sendMessage(text)
+        // Electron 환경: IPC 사용 (streaming rewrite in Task 12)
+        result = await mockResponse(text)
       } else {
         // 브라우저 환경(개발): mock
         result = await mockResponse(text)

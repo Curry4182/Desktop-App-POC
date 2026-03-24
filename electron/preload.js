@@ -1,39 +1,45 @@
-// @ts-check
-// Electron preload — 렌더러 프로세스에서 NODE_OPTIONS(tsx)가 적용되지 않으므로
-// 순수 CommonJS JavaScript로 작성. preload.ts는 타입체크 전용.
-'use strict'
-
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  /**
-   * 메시지 전송 → LangGraph Agent → 응답 반환
-   * @param {string} message
-   * @param {unknown[]} history
-   */
-  sendMessage: (message, history = []) =>
-    ipcRenderer.invoke('agent:message', { message, history }),
-
-  /**
-   * UI 액션 이벤트 수신 (main → renderer)
-   * @param {(action: unknown) => void} callback
-   */
-  onUIAction: (callback) => {
-    ipcRenderer.on('ui:action', (_event, action) => callback(action))
+  // Fire-and-forget message send
+  sendMessage: (message, searchEnabled) => {
+    ipcRenderer.send('agent:message', { message, searchEnabled })
   },
 
-  /**
-   * 스트리밍 응답 수신 (향후 확장용)
-   * @param {(chunk: unknown) => void} callback
-   */
-  onStreamChunk: (callback) => {
-    ipcRenderer.on('agent:stream', (_event, chunk) => callback(chunk))
+  // Streaming listeners
+  onStreamToken: (callback) => {
+    ipcRenderer.on('agent:stream:token', (_event, data) => callback(data))
+  },
+  onStreamStep: (callback) => {
+    ipcRenderer.on('agent:stream:step', (_event, data) => callback(data))
+  },
+  onStreamDone: (callback) => {
+    ipcRenderer.on('agent:stream:done', (_event, data) => callback(data))
+  },
+  onStreamError: (callback) => {
+    ipcRenderer.on('agent:stream:error', (_event, data) => callback(data))
   },
 
-  /**
-   * 리스너 정리 (컴포넌트 unmount 시 호출)
-   * @param {string} channel
-   */
+  // HITL listeners & senders
+  onConfirmRequest: (callback) => {
+    ipcRenderer.on('agent:confirm', (_event, data) => callback(data))
+  },
+  sendConfirmResponse: (response) => {
+    ipcRenderer.send('agent:confirm:response', response)
+  },
+  onClarifyRequest: (callback) => {
+    ipcRenderer.on('agent:clarify', (_event, data) => callback(data))
+  },
+  sendClarifyResponse: (response) => {
+    ipcRenderer.send('agent:clarify:response', response)
+  },
+
+  // Search toggle
+  toggleSearch: (enabled) => {
+    ipcRenderer.send('agent:search:toggle', { enabled })
+  },
+
+  // Cleanup
   removeAllListeners: (channel) => {
     ipcRenderer.removeAllListeners(channel)
   },
