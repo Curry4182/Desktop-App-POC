@@ -65,7 +65,7 @@ export async function researchNode(state: { messages: any[]; conversationSummary
   const result = await researchAgent.invoke(state, { recursionLimit: 25 })
   const lastMsg = result.messages[result.messages.length - 1]
   return new Command({
-    goto: 'supervisor',
+    goto: '__end__',
     update: { messages: [lastMsg] },
   })
 }

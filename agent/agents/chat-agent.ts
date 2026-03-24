@@ -33,7 +33,7 @@ export async function chatNode(state: { messages: any[]; conversationSummary?: s
   const response = await llm.invoke(messagesForLLM)
 
   return new Command({
-    goto: 'supervisor',
+    goto: '__end__',
     update: { messages: [response] },
   })
 }

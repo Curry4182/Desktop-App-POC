@@ -113,7 +113,7 @@ export async function pcFixNode(state: { messages: any[]; conversationSummary?: 
   const result = await pcFixAgent.invoke(state, { recursionLimit: 15 })
   const lastMsg = result.messages[result.messages.length - 1]
   return new Command({
-    goto: 'supervisor',
+    goto: '__end__',
     update: { messages: [lastMsg] },
   })
 }

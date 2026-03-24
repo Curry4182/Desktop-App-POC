@@ -32,13 +32,13 @@ function buildGraph() {
       ends: ['research', 'pc_fix', 'chat', '__end__'],
     })
     .addNode('research', researchNode, {
-      ends: ['supervisor'],
+      ends: ['__end__'],
     })
     .addNode('pc_fix', pcFixNode, {
-      ends: ['supervisor'],
+      ends: ['__end__'],
     })
     .addNode('chat', chatNode, {
-      ends: ['supervisor'],
+      ends: ['__end__'],
     })
     .addEdge(START, 'supervisor')
 
