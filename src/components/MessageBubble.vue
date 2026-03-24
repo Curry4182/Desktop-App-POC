@@ -2,6 +2,24 @@
   <div class="message-bubble" :class="message.role">
     <div class="bubble-content">
       <div class="text" v-html="formattedContent"></div>
+      <!-- ReAct steps (collapsible) -->
+      <div v-if="message.steps && message.steps.length > 0" class="react-steps">
+        <div class="step-toggle" @click="showSteps = !showSteps">
+          {{ showSteps ? '▼' : '▶' }} 처리 과정 ({{ message.steps.length }}단계)
+        </div>
+        <div v-if="showSteps" class="steps-list">
+          <div v-for="(step, i) in message.steps" :key="i" class="step-item">
+            <span class="step-icon">
+              {{ step.step === 'thinking' ? '🤔' : step.step === 'action' ? '🔍' : '📄' }}
+            </span>
+            {{ step.summary }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Streaming cursor -->
+      <span v-if="message.isStreaming" class="streaming-cursor">▌</span>
+
       <span class="time">{{ formatTime(message.timestamp) }}</span>
     </div>
     <div v-if="message.diagnosticResults" class="diagnostic-summary">
@@ -24,6 +42,7 @@ const props = defineProps({
 })
 
 const showDetails = ref(false)
+const showSteps = ref(false)
 
 function toggleDetails() {
   showDetails.value = !showDetails.value
@@ -152,4 +171,13 @@ const formattedContent = computed(() => {
   white-space: pre;
   font-family: ui-monospace, 'Courier New', monospace;
 }
+
+.react-steps { margin-top: 8px; font-size: 0.85rem; }
+.step-toggle { cursor: pointer; color: #888; user-select: none; }
+.step-toggle:hover { color: #555; }
+.steps-list { margin-top: 4px; padding-left: 8px; border-left: 2px solid #e0e0e0; }
+.step-item { padding: 4px 0; display: flex; align-items: center; gap: 6px; }
+.step-icon { font-size: 0.9rem; }
+.streaming-cursor { animation: blink 0.8s infinite; color: #4a90d9; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 </style>

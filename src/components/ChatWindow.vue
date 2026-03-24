@@ -6,13 +6,24 @@
         :key="idx"
         :message="msg"
       />
+      <ClarificationCard
+        v-if="chatStore.pendingClarify"
+        :request="chatStore.pendingClarify"
+        @respond="(sel, ft) => chatStore.respondToClarify(sel, ft)"
+      />
+      <ErrorRetryCard
+        v-if="chatStore.lastError"
+        :error="chatStore.lastError"
+        @retry="chatStore.retryLastMessage"
+        @dismiss="chatStore.dismissError"
+      />
       <div v-if="chatStore.isLoading" class="typing-indicator">
         <span></span><span></span><span></span>
       </div>
     </div>
     <div class="input-area">
-      <div class="route-badge" v-if="chatStore.lastRoute">
-        {{ routeLabel(chatStore.lastRoute) }}
+      <div class="route-badge" v-if="chatStore.lastAgentName">
+        {{ agentLabel(chatStore.lastAgentName) }}
       </div>
       <div class="input-row">
         <textarea
@@ -35,50 +46,52 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import MessageBubble from './MessageBubble.vue'
+import ClarificationCard from './ClarificationCard.vue'
+import ErrorRetryCard from './ErrorRetryCard.vue'
 import { useChatStore } from '../stores/chat.js'
 
 const chatStore = useChatStore()
 const inputText = ref('')
 const messagesEl = ref(null)
 
-const ROUTE_LABELS = {
-  rag: 'RAG',
-  diagnostic: '진단',
-  ui_action: 'UI',
-  chat: '채팅',
+const AGENT_LABELS = {
+  search: '검색',
+  pc_fix: 'PC 진단',
+  chat: '대화',
 }
 
-function routeLabel(route) {
-  return ROUTE_LABELS[route] || route
+function agentLabel(name) {
+  return AGENT_LABELS[name] || name
 }
 
-async function sendMessage() {
+function scrollToBottom() {
+  if (messagesEl.value) {
+    messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+  }
+}
+
+function sendMessage() {
   const text = inputText.value.trim()
   if (!text || chatStore.isLoading) return
 
   inputText.value = ''
-  await chatStore.sendMessage(text)
+  chatStore.sendMessage(text)
 }
 
 watch(
   () => chatStore.messages.length,
   async () => {
     await nextTick()
-    if (messagesEl.value) {
-      messagesEl.value.scrollTop = messagesEl.value.scrollHeight
-    }
+    scrollToBottom()
   }
 )
 
-onMounted(() => {
-  if (window.electronAPI) {
-    window.electronAPI.onUIAction((action) => {
-      chatStore.executeUIAction(action)
-    })
-  }
-})
+watch(
+  () => chatStore.messages[chatStore.messages.length - 1]?.content,
+  () => { nextTick(() => scrollToBottom()) },
+)
 </script>
 
 <style scoped>

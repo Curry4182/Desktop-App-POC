@@ -5,6 +5,8 @@
         <header class="app-header">
           <h1>Design Assistant</h1>
           <span class="subtitle">CAD & PC 진단 AI</span>
+          <div class="header-spacer"></div>
+          <SearchToggle v-model="chatStore.searchEnabled" @update:modelValue="chatStore.toggleSearch" />
         </header>
         <main class="app-body">
           <ChatWindow />
@@ -12,12 +14,18 @@
         </main>
       </div>
     </div>
+    <ConfirmDialog
+      :request="chatStore.pendingConfirm"
+      @confirm="(confirmed) => chatStore.respondToConfirm(confirmed)"
+    />
   </div>
 </template>
 
 <script setup>
 import ChatWindow from './components/ChatWindow.vue'
 import DiagnosticPanel from './components/DiagnosticPanel.vue'
+import SearchToggle from './components/SearchToggle.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useChatStore } from './stores/chat.js'
 
 const chatStore = useChatStore()
@@ -100,6 +108,8 @@ body {
   color: rgba(255, 255, 255, 0.6);
   font-weight: 400;
 }
+
+.header-spacer { flex: 1; }
 
 .app-body {
   flex: 1;
