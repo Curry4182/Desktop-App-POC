@@ -4,6 +4,7 @@ import { interrupt } from '@langchain/langgraph'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
 import { researchTool } from './agents/research-agent.js'
 import { generateAnswerTool } from './agents/answer-agent.js'
+import { askUserTool } from './tools/ask-user.js'
 import type { AgentName } from './types.js'
 
 const MAX_ITERATIONS = parseInt(process.env.REACT_MAX_ITERATIONS || '5', 10)
@@ -144,6 +145,14 @@ const SUPERVISOR_REACT_PROMPT = `당신은 CAD 설계 어시스턴트의 Supervi
 ## 도구
 1. research: 질문에 대한 자료를 검색합니다
 2. generate_answer: 수집된 자료로 최종 답변을 생성합니다
+3. ask_user: 조사 중 사용자에게 보충 질문이 필요할 때 사용합니다
+
+## ask_user 사용 시점
+- 조건 분해 후, 교집합 후보가 여러 개일 때: "미국과 프랑스 중 어느 나라에 대해 알고 싶으신가요?"
+- 검색 결과가 모호하거나 여러 해석이 가능할 때
+- 사용자 의도가 불분명하여 조사 방향을 정할 수 없을 때
+
+주의: 불필요한 보충 질문은 하지 마세요. 자료로 판단 가능하면 바로 진행하세요.
 
 ## 핵심 원칙: 인과 체인 추론
 
@@ -202,7 +211,7 @@ export function createSupervisorReactAgent() {
   const llm = createLLM({ temperature: 0.3 })
   return createReactAgent({
     llm,
-    tools: [researchTool, generateAnswerTool],
+    tools: [researchTool, generateAnswerTool, askUserTool],
     prompt: SUPERVISOR_REACT_PROMPT,
     name: 'supervisor_react',
   })
