@@ -60,6 +60,9 @@ export const useChatStore = defineStore('chat', () => {
     if (listenersSetup || !window.electronAPI) return
     listenersSetup = true
 
+    // Reset backend conversation history on fresh renderer load
+    window.electronAPI.resetConversation()
+
     window.electronAPI.onStreamToken((data) => {
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.isStreaming) {

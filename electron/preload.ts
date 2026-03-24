@@ -23,6 +23,7 @@ export interface ElectronAPI {
   sendClarifyResponse: (response: {
     id: string; selected: string[]; freeText?: string
   }) => void
+  resetConversation: () => void
   toggleSearch: (enabled: boolean) => void
   removeAllListeners: (channel: string) => void
 }

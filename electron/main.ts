@@ -65,6 +65,14 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
+// ─── Reset conversation on renderer load ───
+
+ipcMain.on('agent:reset', () => {
+  if (conversationManager) {
+    conversationManager.reset()
+  }
+})
+
 // ─── Streaming Message Handler ───
 
 ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {

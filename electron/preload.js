@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('agent:clarify:response', response)
   },
 
+  // Reset conversation
+  resetConversation: () => {
+    ipcRenderer.send('agent:reset')
+  },
+
   // Search toggle
   toggleSearch: (enabled) => {
     ipcRenderer.send('agent:search:toggle', { enabled })
