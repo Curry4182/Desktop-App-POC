@@ -1,0 +1,31 @@
+{
+  "scripts": [
+    {
+      "id": "fix-network",
+      "name": "네트워크 초기화",
+      "description": "DNS 캐시 초기화 및 네트워크 어댑터 재시작",
+      "file": "fix-network.bat",
+      "platform": "windows",
+      "symptoms": ["인터넷 연결 안 됨", "DNS 오류", "네트워크 느림"],
+      "category": "network"
+    },
+    {
+      "id": "clear-dns-cache",
+      "name": "DNS 캐시 초기화",
+      "description": "DNS 캐시를 비우고 DNS 클라이언트 서비스를 재시작",
+      "file": "clear-dns-cache.ps1",
+      "platform": "windows",
+      "symptoms": ["DNS 오류", "특정 사이트 접속 불가", "도메인 해석 실패"],
+      "category": "network"
+    },
+    {
+      "id": "clear-temp",
+      "name": "임시 파일 정리",
+      "description": "Windows 임시 폴더 및 브라우저 캐시 정리",
+      "file": "clear-temp-files.bat",
+      "platform": "windows",
+      "symptoms": ["디스크 용량 부족", "PC 느림", "저장 공간 부족"],
+      "category": "storage"
+    }
+  ]
+}
