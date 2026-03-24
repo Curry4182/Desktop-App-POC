@@ -100,16 +100,10 @@ export async function* streamMessage(
 
   let finalResponse = ''
   let agentName: AgentName = 'chat'
+  let activeNode = ''
 
   for await (const event of stream) {
-    if (event.event === 'on_chat_model_stream' && event.data?.chunk) {
-      const content = event.data.chunk.content
-      if (typeof content === 'string' && content) {
-        finalResponse += content
-        yield { type: 'token' as const, content }
-      }
-    }
-
+    // Track which node is currently executing
     if (event.event === 'on_chain_start' && event.name) {
       const stepMap: Record<string, string> = {
         supervisor: '메시지를 분석하고 있습니다...',
@@ -118,8 +112,24 @@ export async function* streamMessage(
         chat: '응답을 생성하고 있습니다...',
       }
       if (stepMap[event.name]) {
+        activeNode = event.name
         if (event.name !== 'supervisor') agentName = event.name as AgentName
         yield { type: 'step' as const, step: 'action' as const, summary: stepMap[event.name] }
+      }
+    }
+
+    // Only stream LLM tokens from non-supervisor nodes
+    // Supervisor's JSON classification output should not be shown to the user
+    if (event.event === 'on_chat_model_stream' && event.data?.chunk) {
+      const tags: string[] = event.tags || []
+      const isSupervisorLLM = tags.some(t => t.includes('supervisor')) || activeNode === 'supervisor'
+
+      if (!isSupervisorLLM) {
+        const content = event.data.chunk.content
+        if (typeof content === 'string' && content) {
+          finalResponse += content
+          yield { type: 'token' as const, content }
+        }
       }
     }
   }

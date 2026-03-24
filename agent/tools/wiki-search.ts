@@ -29,10 +29,12 @@ async function searchWikipedia(query: string, topK: number): Promise<string> {
       const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page.title)}`
       try {
         const res = await fetch(summaryUrl)
-        const data = await res.json() as { title: string; extract: string }
-        return `## ${data.title}\n${data.extract}`
+        const data = await res.json() as { title: string; extract: string; content_urls?: { desktop?: { page?: string } } }
+        const url = data.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`
+        return `## ${data.title}\n${data.extract}\n\n출처: ${url}`
       } catch {
-        return `## ${page.title}\n${page.snippet.replace(/<[^>]*>/g, '')}`
+        const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`
+        return `## ${page.title}\n${page.snippet.replace(/<[^>]*>/g, '')}\n\n출처: ${url}`
       }
     })
   )
