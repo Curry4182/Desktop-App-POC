@@ -2,6 +2,20 @@
   <div class="message-bubble" :class="message.role">
     <div class="bubble-content">
       <div class="text" v-html="formattedContent"></div>
+
+      <!-- Source badges (clickable) -->
+      <div v-if="message.sources && message.sources.length > 0" class="source-badges">
+        <button
+          v-for="(src, i) in message.sources"
+          :key="i"
+          class="source-badge"
+          @click="selectedSource = src"
+        >
+          <span class="badge-icon">📄</span>
+          {{ src.title }}
+        </button>
+      </div>
+
       <!-- ReAct steps (collapsible) -->
       <div v-if="message.steps && message.steps.length > 0" class="react-steps">
         <div class="step-toggle" @click="showSteps = !showSteps">
@@ -28,11 +42,18 @@
       </button>
       <pre v-if="showDetails" class="diagnostic-json">{{ JSON.stringify(message.diagnosticResults, null, 2) }}</pre>
     </div>
+
+    <!-- Source content modal -->
+    <SourceModal
+      :source="selectedSource"
+      @close="selectedSource = null"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
+import SourceModal from './SourceModal.vue'
 
 const props = defineProps({
   message: {
@@ -43,6 +64,7 @@ const props = defineProps({
 
 const showDetails = ref(false)
 const showSteps = ref(false)
+const selectedSource = ref(null)
 
 function toggleDetails() {
   showDetails.value = !showDetails.value
@@ -55,6 +77,17 @@ function formatTime(ts) {
 
 const formattedContent = computed(() => {
   let text = props.message.content || ''
+
+  // Remove source lines from text (they're shown as badges now)
+  text = text.replace(/^-?\s*\[출처:.*?\].*$/gm, '')
+  text = text.replace(/^-?\s*\[출처:.*?\(.*?\)\].*$/gm, '')
+  // Also remove markdown link source patterns: - [출처: Title](url)
+  text = text.replace(/^-?\s*\[출처:.*?\]\(.*?\)\s*$/gm, '')
+  // Clean up multiple consecutive blank lines
+  text = text.replace(/\n{3,}/g, '\n\n')
+  text = text.trim()
+
+  // Markdown formatting
   text = text.replace(/```[\s\S]*?```/g, (m) => `<pre class="code-block">${m.replace(/```\w*\n?/g, '')}</pre>`)
   text = text.replace(/`([^`]+)`/g, '<code>$1</code>')
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -106,13 +139,8 @@ const formattedContent = computed(() => {
   text-align: right;
 }
 
-.user .time {
-  color: #1e293b;
-}
-
-.assistant .time {
-  color: #64748b;
-}
+.user .time { color: #1e293b; }
+.assistant .time { color: #64748b; }
 
 :deep(.code-block) {
   background: #f1f5f9;
@@ -136,9 +164,40 @@ const formattedContent = computed(() => {
   color: #002C5F;
 }
 
-.diagnostic-summary {
-  margin-top: 6px;
+/* ─── Source Badges ─── */
+.source-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
 }
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #f0f4ff;
+  border: 1px solid #d0daf0;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #002C5F;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.source-badge:hover {
+  background: #dbe4ff;
+  border-color: #002C5F;
+}
+
+.badge-icon { font-size: 13px; }
+
+/* ─── Diagnostic ─── */
+.diagnostic-summary { margin-top: 6px; }
 
 .toggle-btn {
   font-size: 12px;
@@ -172,6 +231,7 @@ const formattedContent = computed(() => {
   font-family: ui-monospace, 'Courier New', monospace;
 }
 
+/* ─── ReAct Steps ─── */
 .react-steps { margin-top: 8px; font-size: 0.85rem; }
 .step-toggle { cursor: pointer; color: #888; user-select: none; }
 .step-toggle:hover { color: #555; }

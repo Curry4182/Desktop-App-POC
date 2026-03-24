@@ -1,12 +1,22 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+interface ResearchSource {
+  title: string
+  content: string
+  sourceType: string
+  url?: string
+  documentId?: string
+  metadata?: Record<string, unknown>
+}
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
   diagnosticResults?: unknown
   steps?: Array<{ step: string; summary: string }>
+  sources?: ResearchSource[]
   isStreaming?: boolean
 }
 
@@ -70,6 +80,9 @@ export const useChatStore = defineStore('chat', () => {
         lastMsg.content = data.response
         lastMsg.isStreaming = false
         lastMsg.diagnosticResults = data.diagnosticResults
+        if (data.sources && data.sources.length > 0) {
+          lastMsg.sources = data.sources
+        }
       }
       lastAgentName.value = data.agentName
       if (data.diagnosticResults) {

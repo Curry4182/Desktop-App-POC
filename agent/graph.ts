@@ -102,6 +102,10 @@ export async function* streamMessage(
   let finalResponse = ''
   let agentName: AgentName = 'chat'
   let activeNode = ''
+  const collectedSources: Array<{
+    title: string; content: string; sourceType: string;
+    url?: string; documentId?: string; metadata?: Record<string, unknown>
+  }> = []
 
   for await (const event of stream) {
     // Track which node is currently executing
@@ -119,8 +123,34 @@ export async function* streamMessage(
       }
     }
 
-    // Only stream LLM tokens from non-supervisor nodes
-    // Supervisor's JSON classification output should not be shown to the user
+    // Capture tool invocations — show search keywords in UI
+    if (event.event === 'on_tool_start' && event.name === 'wiki_search') {
+      const input = event.data?.input
+      const query = typeof input === 'object' ? input?.query : String(input)
+      if (query) {
+        yield { type: 'step' as const, step: 'observation' as const, summary: `🔍 "${query}" 검색 중...` }
+      }
+    }
+
+    // Capture tool results — collect structured sources
+    if (event.event === 'on_tool_end' && event.name === 'wiki_search') {
+      try {
+        const output = event.data?.output
+        const text = typeof output === 'string' ? output : output?.content || ''
+        const parsed = JSON.parse(text)
+        if (parsed.sources && Array.isArray(parsed.sources)) {
+          for (const src of parsed.sources) {
+            // Deduplicate by documentId or title
+            if (!collectedSources.some(s => s.documentId === src.documentId || s.title === src.title)) {
+              collectedSources.push(src)
+            }
+          }
+          yield { type: 'step' as const, step: 'observation' as const, summary: `📄 ${parsed.sources.length}개 문서 수집 완료` }
+        }
+      } catch { /* non-JSON tool output, ignore */ }
+    }
+
+    // Only stream LLM tokens from non-classifier nodes
     if (event.event === 'on_chat_model_stream' && event.data?.chunk) {
       const tags: string[] = event.tags || []
       const isClassifierLLM = tags.some(t => t.includes('classifier')) || activeNode === 'classifier'
@@ -140,6 +170,7 @@ export async function* streamMessage(
     response: finalResponse,
     agentName,
     diagnosticResults: null,
+    sources: collectedSources,
   }
 }
 

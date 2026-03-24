@@ -6,6 +6,10 @@ export interface ElectronAPI {
     response: string
     agentName: string
     diagnosticResults: unknown
+    sources: Array<{
+      title: string; content: string; sourceType: string;
+      url?: string; documentId?: string; metadata?: Record<string, unknown>
+    }>
   }) => void) => void
   onStreamError: (callback: (data: { message: string; errorType: string }) => void) => void
   onConfirmRequest: (callback: (data: {
