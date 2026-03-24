@@ -57,7 +57,7 @@ const inputText = ref('')
 const messagesEl = ref(null)
 
 const AGENT_LABELS = {
-  search: '검색',
+  research: '자료조사',
   pc_fix: 'PC 진단',
   chat: '대화',
 }

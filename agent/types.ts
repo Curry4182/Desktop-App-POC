@@ -179,8 +179,26 @@ export interface ClarifyResponse {
   freeText?: string
 }
 
+// ─── Research Result ───
+export interface ResearchSource {
+  title: string
+  content: string
+  sourceType: 'wikipedia' | 'internal_api' | 'other'
+  url?: string               // Wikipedia 등 웹 소스용
+  documentId?: string         // 자체 API 문서 ID용
+  author?: string
+  lastUpdated?: string
+  metadata?: Record<string, unknown>  // 자체 API 메타데이터 확장용
+}
+
+export interface ResearchResult {
+  query: string
+  sources: ResearchSource[]
+  summary: string
+}
+
 // ─── Agent State ───
-export type AgentName = 'search' | 'pc_fix' | 'chat'
+export type AgentName = 'research' | 'pc_fix' | 'chat'
 
 export interface SupervisorState {
   messages: BaseMessage[]
