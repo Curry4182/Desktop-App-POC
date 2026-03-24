@@ -1,7 +1,7 @@
 <template>
   <div class="message-bubble" :class="message.role">
     <div class="bubble-content">
-      <div class="text" v-html="formattedContent"></div>
+      <div class="text" v-if="message.content" v-html="formattedContent"></div>
 
       <!-- Source badges (clickable) -->
       <div v-if="message.sources && message.sources.length > 0" class="source-badges">
@@ -34,10 +34,10 @@
         </div>
       </div>
 
-      <!-- Streaming cursor -->
-      <span v-if="message.isStreaming" class="streaming-cursor">|</span>
+      <!-- Streaming cursor — only when text is actively being written -->
+      <span v-if="message.isStreaming && message.content" class="streaming-cursor">|</span>
 
-      <span class="time">{{ formatTime(message.timestamp) }}</span>
+      <span v-if="!message.isStreaming || message.content" class="time">{{ formatTime(message.timestamp) }}</span>
     </div>
     <div v-if="message.diagnosticResults" class="diagnostic-summary">
       <button @click="toggleDetails" class="toggle-btn">

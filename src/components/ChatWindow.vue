@@ -17,7 +17,8 @@
         @retry="chatStore.retryLastMessage"
         @dismiss="chatStore.dismissError"
       />
-      <div v-if="chatStore.isLoading" class="typing-indicator">
+      <!-- typing indicator only when no steps are showing (e.g. chat mode) -->
+      <div v-if="chatStore.isLoading && !lastMessageHasSteps" class="typing-indicator">
         <span></span><span></span><span></span>
       </div>
     </div>
@@ -46,7 +47,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import ClarificationCard from './ClarificationCard.vue'
 import ErrorRetryCard from './ErrorRetryCard.vue'
@@ -55,6 +56,11 @@ import { useChatStore } from '../stores/chat.js'
 const chatStore = useChatStore()
 const inputText = ref('')
 const messagesEl = ref(null)
+
+const lastMessageHasSteps = computed(() => {
+  const last = chatStore.messages[chatStore.messages.length - 1]
+  return last?.steps && last.steps.length > 0
+})
 
 const AGENT_LABELS = {
   research: '자료조사',
