@@ -252,18 +252,35 @@ export async function* resumeGraph(
 ) {
   const app = getGraph()
 
+  // Read current state to get agentName before resuming
+  let agentName: AgentName = 'chat'
+  try {
+    const currentState = await app.getState({ configurable: { thread_id: threadId } })
+    agentName = (currentState.values as any)?.agentName || 'chat'
+  } catch { /* fallback to chat */ }
+
   const stream = app.streamEvents(
     new Command({ resume: resumeValue }),
-    {
-      configurable: { thread_id: threadId },
-      version: 'v2',
-    },
+    { configurable: { thread_id: threadId }, version: 'v2' },
   )
 
   let finalResponse = ''
+  const isResearch = agentName === 'research'
 
   for await (const event of stream) {
-    if (event.event === 'on_chat_model_stream' && event.data?.chunk) {
+    // Capture research node response
+    if (isResearch && event.event === 'on_chain_end' && event.name === 'research') {
+      try {
+        const response = event.data?.output?.response
+        if (typeof response === 'string' && response) {
+          finalResponse = response
+          yield { type: 'token' as const, content: response }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Stream chat/pc_fix tokens
+    if (!isResearch && event.event === 'on_chat_model_stream' && event.data?.chunk) {
       const content = event.data.chunk.content
       if (typeof content === 'string' && content) {
         finalResponse += content
@@ -272,11 +289,28 @@ export async function* resumeGraph(
     }
   }
 
+  // Check for further interrupts after resume
+  try {
+    const state = await app.getState({ configurable: { thread_id: threadId } })
+    if (state.next && state.next.length > 0 && state.tasks) {
+      for (const task of state.tasks) {
+        if (task.interrupts && task.interrupts.length > 0) {
+          for (const intr of task.interrupts) {
+            yield { type: 'interrupt' as const, interruptData: intr.value }
+          }
+          return
+        }
+      }
+    }
+  } catch { /* no interrupt */ }
+
   yield {
     type: 'done' as const,
     response: finalResponse,
-    agentName: 'pc_fix' as AgentName,
+    agentName,
     diagnosticResults: null,
+    sources: [] as any[],
+    tokenUsage: {} as Record<string, { input: number; output: number }>,
   }
 }
 
