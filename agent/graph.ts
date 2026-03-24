@@ -123,35 +123,51 @@ export async function* streamMessage(
       }
     }
 
-    // Capture tool invocations — show search keywords and research questions
-    if (event.event === 'on_tool_start') {
-      const input = event.data?.input
-      if (event.name === 'wiki_search' && input) {
-        const query = typeof input === 'object' ? input.query : String(input)
-        if (query) {
-          yield { type: 'step' as const, step: 'observation' as const, summary: `🔍 "${query}" 키워드로 검색 중...` }
+    // Capture LLM tool_calls to show research questions being asked
+    if (event.event === 'on_chat_model_end' && activeNode === 'research') {
+      try {
+        const output = event.data?.output
+        const toolCalls = output?.tool_calls || output?.additional_kwargs?.tool_calls || []
+        for (const tc of toolCalls) {
+          if (tc.name === 'research' && tc.args?.question) {
+            yield { type: 'step' as const, step: 'action' as const, summary: `📝 조사 질문: "${tc.args.question}"` }
+          }
         }
-      } else if (event.name === 'research' && input) {
-        const question = typeof input === 'object' ? input.question : String(input)
-        if (question) {
-          yield { type: 'step' as const, step: 'action' as const, summary: `📝 조사 질문: "${question}"` }
-        }
-      }
+      } catch { /* ignore */ }
     }
 
-    // Capture tool results — collect structured sources (skip 0 results)
-    if (event.event === 'on_tool_end' && event.name === 'wiki_search') {
+    // Capture research tool results — extract search keywords + found documents
+    if (event.event === 'on_tool_end') {
       try {
         const output = event.data?.output
         const text = typeof output === 'string' ? output : output?.content || ''
         const parsed = JSON.parse(text)
+
+        // Research tool returns { answer, searchLog: { keywords, foundDocuments } }
+        if (parsed.searchLog) {
+          const { keywords, foundDocuments } = parsed.searchLog
+          if (keywords && keywords.length > 0) {
+            yield { type: 'step' as const, step: 'observation' as const, summary: `🔍 검색 키워드: ${keywords.map((k: string) => `"${k}"`).join(', ')}` }
+          }
+          if (foundDocuments && foundDocuments.length > 0) {
+            const titles = foundDocuments.map((d: { title: string }) => d.title).join(', ')
+            yield { type: 'step' as const, step: 'observation' as const, summary: `📄 ${foundDocuments.length}개 문서 발견: ${titles}` }
+            // Collect full sources for badges + modal
+            for (const doc of foundDocuments) {
+              if (!collectedSources.some(s => s.title === doc.title)) {
+                collectedSources.push(doc)
+              }
+            }
+          }
+        }
+
+        // Also handle direct wiki_search results (if event propagates)
         if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
           for (const src of parsed.sources) {
             if (!collectedSources.some(s => s.documentId === src.documentId || s.title === src.title)) {
               collectedSources.push(src)
             }
           }
-          yield { type: 'step' as const, step: 'observation' as const, summary: `📄 ${parsed.sources.length}개 문서 수집 완료` }
         }
       } catch { /* non-JSON tool output, ignore */ }
     }

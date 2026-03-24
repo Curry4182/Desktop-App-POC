@@ -23,7 +23,6 @@ const RESEARCH_SYSTEM_PROMPT = `당신은 자료조사 전문 에이전트입니
 
 항상 사용자와 같은 언어로 답변하세요.`
 
-// Internal ReAct agent for research
 function createInternalResearchAgent() {
   const llm = createLLM({ temperature: 0.3 })
   return createReactAgent({
@@ -34,8 +33,54 @@ function createInternalResearchAgent() {
   })
 }
 
-// Research tool — Supervisor calls this as a tool
-// Each call answers a specific research question
+// Extract search keywords and found documents from the agent's message history
+function extractSearchLog(messages: Array<{ _getType: () => string; content: unknown; name?: string }>): {
+  keywords: string[]
+  foundDocuments: Array<{ title: string; content: string; sourceType: string; url?: string; documentId?: string; metadata?: Record<string, unknown> }>
+} {
+  const keywords: string[] = []
+  const foundDocuments: Array<{ title: string; content: string; sourceType: string; url?: string; documentId?: string; metadata?: Record<string, unknown> }> = []
+
+  for (const msg of messages) {
+    // Tool call messages contain the search query
+    if (msg._getType() === 'ai') {
+      const content = msg.content
+      // Check for tool_calls in additional_kwargs or tool_calls property
+      const aiMsg = msg as any
+      const toolCalls = aiMsg.tool_calls || aiMsg.additional_kwargs?.tool_calls || []
+      for (const tc of toolCalls) {
+        if (tc.name === 'wiki_search' && tc.args?.query) {
+          keywords.push(tc.args.query)
+        }
+      }
+    }
+
+    // Tool response messages contain the search results
+    if (msg._getType() === 'tool' && msg.name === 'wiki_search') {
+      try {
+        const parsed = JSON.parse(String(msg.content))
+        if (parsed.sources && Array.isArray(parsed.sources)) {
+          for (const src of parsed.sources) {
+            if (!foundDocuments.some(d => d.title === src.title)) {
+              foundDocuments.push({
+                title: src.title,
+                content: src.content || '',
+                sourceType: src.sourceType,
+                url: src.url,
+                documentId: src.documentId,
+                metadata: src.metadata,
+              })
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  return { keywords, foundDocuments }
+}
+
+// Research tool — returns answer + structured search log
 export const researchTool = tool(
   async ({ question }) => {
     const agent = createInternalResearchAgent()
@@ -43,8 +88,16 @@ export const researchTool = tool(
       { messages: [new HumanMessage(question)] },
       { recursionLimit: MAX_ITERATIONS * 2 },
     )
+
     const lastMsg = result.messages[result.messages.length - 1]
-    return String(lastMsg.content)
+    const answer = String(lastMsg.content)
+    const searchLog = extractSearchLog(result.messages as any)
+
+    // Return structured response with search log
+    return JSON.stringify({
+      answer,
+      searchLog,
+    })
   },
   {
     name: 'research',
