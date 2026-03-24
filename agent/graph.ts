@@ -102,6 +102,7 @@ export async function* streamMessage(
   let finalResponse = ''
   let agentName: AgentName = 'chat'
   let activeNode = ''
+  let answerPhase = false  // Only stream tokens during answer generation
   const collectedSources: Array<{
     title: string; content: string; sourceType: string;
     url?: string; documentId?: string; metadata?: Record<string, unknown>
@@ -119,11 +120,13 @@ export async function* streamMessage(
       if (stepMap[event.name]) {
         activeNode = event.name
         if (event.name !== 'classifier') agentName = event.name as AgentName
+        // For chat and pc_fix, stream tokens immediately (no answer phase needed)
+        if (event.name === 'chat' || event.name === 'pc_fix') answerPhase = true
         yield { type: 'step' as const, step: 'action' as const, summary: stepMap[event.name] }
       }
     }
 
-    // Capture LLM tool_calls to show research questions being asked
+    // Capture LLM tool_calls to show research questions and detect answer phase
     if (event.event === 'on_chat_model_end' && activeNode === 'research') {
       try {
         const output = event.data?.output
@@ -133,6 +136,7 @@ export async function* streamMessage(
             yield { type: 'step' as const, step: 'action' as const, summary: `📝 조사 질문: "${tc.args.question}"` }
           }
           if (tc.name === 'generate_answer') {
+            answerPhase = true
             yield { type: 'step' as const, step: 'action' as const, summary: `✍️ 답변을 생성하고 있습니다...` }
           }
         }
@@ -155,7 +159,6 @@ export async function* streamMessage(
           if (foundDocuments && foundDocuments.length > 0) {
             const titles = foundDocuments.map((d: { title: string }) => d.title).join(', ')
             yield { type: 'step' as const, step: 'observation' as const, summary: `📄 ${foundDocuments.length}개 문서 발견: ${titles}` }
-            // Collect full sources for badges + modal
             for (const doc of foundDocuments) {
               if (!collectedSources.some(s => s.title === doc.title)) {
                 collectedSources.push(doc)
@@ -164,7 +167,6 @@ export async function* streamMessage(
           }
         }
 
-        // Also handle direct wiki_search results (if event propagates)
         if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
           for (const src of parsed.sources) {
             if (!collectedSources.some(s => s.documentId === src.documentId || s.title === src.title)) {
@@ -175,12 +177,13 @@ export async function* streamMessage(
       } catch { /* non-JSON tool output, ignore */ }
     }
 
-    // Only stream LLM tokens from non-classifier nodes
+    // Stream LLM tokens — only during answer phase (or chat/pc_fix nodes)
+    // During research phase, intermediate text is hidden (shown only in steps)
     if (event.event === 'on_chat_model_stream' && event.data?.chunk) {
       const tags: string[] = event.tags || []
       const isClassifierLLM = tags.some(t => t.includes('classifier')) || activeNode === 'classifier'
 
-      if (!isClassifierLLM) {
+      if (!isClassifierLLM && answerPhase) {
         const content = event.data.chunk.content
         if (typeof content === 'string' && content) {
           finalResponse += content
