@@ -1,175 +1,71 @@
-import { tool } from '@langchain/core/tools'
-import { z } from 'zod'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
+import { Command } from '@langchain/langgraph'
+import { SystemMessage } from '@langchain/core/messages'
 import { createLLM } from '../llm-factory.js'
-import { wikiSearchTool, wikiGetSummaryTool, wikiGetDetailTool } from '../tools/wiki-search.js'
-import { HumanMessage } from '@langchain/core/messages'
+import { researchWorkerTool } from '../tools/research-worker.js'
+import { askUserTool } from '../tools/ask-user.js'
 
-const MAX_ITERATIONS = parseInt(process.env.REACT_MAX_ITERATIONS || '5', 10)
+const WINDOW_SIZE = parseInt(process.env.CONVERSATION_WINDOW_SIZE || '10', 10)
 
-const RESEARCH_SYSTEM_PROMPT = `당신은 자료조사 전문 에이전트입니다.
-검색 도구를 사용하여 자료를 수집하고 정리합니다.
+const RESEARCH_PLANNER_PROMPT = `당신은 자료조사 전문 에이전트입니다.
+사용자의 질문을 분석하고, 순차적으로 조사하여, 최종 답변을 생성합니다.
 
 ## 도구
-1. wiki_search: Wikipedia에서 snippet 검색 (가볍게, 결과 미리보기)
-2. wiki_get_summary: 특정 문서의 요약 가져오기 (첫 단락)
-3. wiki_get_detail: 특정 문서의 섹션별 상세 내용 가져오기 (깊은 정보 필요 시)
+1. research_worker: Wikipedia에서 특정 주제를 검색합니다. 1~3단어 영어 키워드가 가장 효과적입니다.
+2. ask_user: 사용자에게 보충 질문을 합니다 (모호한 질문일 때만).
 
-## 검색 키워드 전략 (매우 중요!)
+## 작업 흐름
 
-Wikipedia 검색은 1~3단어의 정확한 영어 키워드가 가장 효과적입니다.
+### 1단계: 질문 분석
+- 질문의 조건을 분해합니다.
+- 예: "CAD를 만든 사람이 살았던 나라의 경제" → (1) CAD 핵심 인물 → (2) 그 나라 → (3) 경제
+- research_worker를 먼저 시도합니다. ask_user는 검색으로 해결 불가능한 모호성에만 사용합니다.
 
-### 규칙:
-1. 핵심 개념어 1~3단어로 첫 검색
-   - "CAD 기술 발전에 기여한 국가" → "Computer-aided design"
-   - "3D 프린팅의 역사" → "3D printing"
-   - "반도체 산업" → "Semiconductor industry"
+### 2단계: 순차 조사
+- 각 조건을 research_worker로 하나씩 조사합니다.
+- 이전 결과를 다음 검색에 반영합니다.
+- 예: research_worker("Computer-aided design") → "Ivan Sutherland, 미국" → research_worker("United States economy")
 
-2. 절대 긴 문장을 검색어로 사용하지 마세요
-   - BAD: "CAD technology development major contributing countries"
-   - GOOD: "Computer-aided design"
+### 3단계: 답변 생성
+- 조사 결과만을 기반으로 답변합니다.
+- 각 정보에 출처를 명시합니다.
+- 검색에서 못 찾은 정보는 "검색 결과에서 해당 정보를 찾지 못했습니다"로 명시합니다.
+- 자체 지식으로 보충하지 마세요.
 
-3. 첫 검색 snippet에서 고유명사를 발견하면 후속 검색
-   - "Computer-aided design" → snippet에서 "Sketchpad", "Ivan Sutherland" 발견
-   - → "Sketchpad" 또는 "Ivan Sutherland" 로 추가 검색
+## 검색 키워드 전략
+- 핵심 개념어 1~3단어 (영어)
+- BAD: "CAD technology development major contributing countries"
+- GOOD: "Computer-aided design"
+- 첫 검색에서 고유명사 발견 시 후속 검색
 
-4. 재검색 시 동의어/관련어를 시도
-   - "CAD" → "AutoCAD", "CATIA", "SolidWorks"
+## ask_user 사용 조건
+- 대명사가 맥락 없이 사용: "그거 뭐야?"
+- research_worker 결과에서 후보가 여러 개이고 사용자 선택이 필요할 때
+- ask_user 후 반드시 research_worker로 검색!
 
-## 검색 흐름
-1. wiki_search로 snippet 검색 (가볍게)
-2. snippet을 읽고 관련 있는 문서 판단
-3. wiki_get_summary로 관련 문서의 요약 조회
-4. 요약만으로 부족하면 → wiki_get_detail(title)로 섹션 목록 확인
-5. 필요한 섹션만 wiki_get_detail(title, section)로 상세 조회
-6. 정보가 부족하면 다른 키워드로 wiki_search 재시도 (최대 3회)
-
-## 재검색 판단 기준
-- 결과 0건 → 키워드를 더 일반적으로 변경
-- snippet이 질문과 무관 → 완전히 다른 키워드로 재검색
-- 부분적 정보만 → 부족한 부분만 추가 검색
-- 3회 검색 후에도 부족 → 수집된 자료만으로 답변
-
-## 답변 형식 (매우 중요!)
-
-답변에는 검색 도구로 찾은 내용만 포함하세요.
-
-절대 금지:
-- "일반적으로 ~로 알려져 있습니다" ← 이건 LLM 자체 지식이지 검색 결과가 아닙니다
-- "~등의 국가에서 발전해왔습니다" ← 검색 결과에 없으면 쓰지 마세요
+## 금지 사항
 - Wikipedia에서 찾지 못한 정보를 자체 지식으로 보충하지 마세요
+- "일반적으로 ~로 알려져 있습니다" ← LLM 자체 지식, 금지
+- 사용자와 같은 언어로 답변하세요`
 
-올바른 답변:
-- 검색에서 찾은 사실만 기술
-- 각 정보에 출처 명시: [출처: 제목 - URL]
-- 못 찾은 정보는 "검색 결과에서 해당 정보를 찾지 못했습니다"로 명시
+const researchAgent = createReactAgent({
+  llm: createLLM({ temperature: 0.3 }),
+  tools: [researchWorkerTool, askUserTool],
+  prompt: (state: { messages: any[]; conversationSummary?: string }) => [
+    new SystemMessage(RESEARCH_PLANNER_PROMPT),
+    ...(state.conversationSummary
+      ? [new SystemMessage(`[이전 대화 요약]\n${state.conversationSummary}`)]
+      : []),
+    ...state.messages.slice(-WINDOW_SIZE),
+  ],
+  name: 'research_agent',
+})
 
-예시:
-BAD: "CAD 기술은 일반적으로 미국, 독일, 일본에서 발전해왔습니다."
-GOOD: "검색 결과에서 CAD 기술 발전에 기여한 구체적인 국가 정보를 찾지 못했습니다. 추가 키워드로 검색을 시도합니다."
-
-사용자와 같은 언어로 답변하세요.`
-
-function createInternalResearchAgent() {
-  const llm = createLLM({ temperature: 0.3 })
-  return createReactAgent({
-    llm,
-    tools: [wikiSearchTool, wikiGetSummaryTool, wikiGetDetailTool],
-    prompt: RESEARCH_SYSTEM_PROMPT,
-    name: 'research_worker',
+export async function researchNode(state: { messages: any[]; conversationSummary?: string }) {
+  const result = await researchAgent.invoke(state, { recursionLimit: 25 })
+  const lastMsg = result.messages[result.messages.length - 1]
+  return new Command({
+    goto: 'supervisor',
+    update: { messages: [lastMsg] },
   })
 }
-
-// Extract search keywords and found documents from agent message history
-function extractSearchLog(messages: Array<{ _getType: () => string; content: unknown; name?: string }>): {
-  keywords: string[]
-  foundDocuments: Array<{ title: string; content: string; sourceType: string; url?: string; documentId?: string; metadata?: Record<string, unknown> }>
-} {
-  const keywords: string[] = []
-  const foundDocuments: Array<{ title: string; content: string; sourceType: string; url?: string; documentId?: string; metadata?: Record<string, unknown> }> = []
-
-  for (const msg of messages) {
-    if (msg._getType() === 'ai') {
-      const aiMsg = msg as any
-      const toolCalls = aiMsg.tool_calls || aiMsg.additional_kwargs?.tool_calls || []
-      for (const tc of toolCalls) {
-        if (tc.name === 'wiki_search' && tc.args?.query) {
-          keywords.push(tc.args.query)
-        }
-      }
-    }
-
-    // Capture wiki_get_summary and wiki_get_detail results
-    if (msg._getType() === 'tool' && (msg.name === 'wiki_get_summary' || msg.name === 'wiki_get_detail')) {
-      try {
-        const parsed = JSON.parse(String(msg.content))
-        const docTitle = parsed.title || parsed.article
-        if (docTitle && !parsed.error) {
-          const existing = foundDocuments.find(d => d.title === docTitle)
-          if (existing && parsed.content) {
-            // Append section content to existing document
-            existing.content += '\n\n' + parsed.content
-          } else if (!existing) {
-            foundDocuments.push({
-              title: docTitle,
-              content: parsed.content || '',
-              sourceType: parsed.sourceType || 'wikipedia',
-              url: parsed.url || `https://en.wikipedia.org/wiki/${encodeURIComponent(docTitle)}`,
-              documentId: parsed.documentId || '',
-              metadata: parsed.metadata,
-            })
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Also capture wiki_search snippets as lightweight sources
-    if (msg._getType() === 'tool' && msg.name === 'wiki_search') {
-      try {
-        const parsed = JSON.parse(String(msg.content))
-        if (parsed.results && Array.isArray(parsed.results)) {
-          for (const r of parsed.results) {
-            if (!foundDocuments.some(d => d.title === r.title)) {
-              foundDocuments.push({
-                title: r.title,
-                content: r.snippet || '',
-                sourceType: 'wikipedia',
-                url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title)}`,
-                documentId: String(r.pageid || ''),
-              })
-            }
-          }
-        }
-      } catch { /* ignore */ }
-    }
-  }
-
-  return { keywords, foundDocuments }
-}
-
-// Research tool — returns answer + structured search log
-export const researchTool = tool(
-  async ({ question }) => {
-    const agent = createInternalResearchAgent()
-    const result = await agent.invoke(
-      { messages: [new HumanMessage(question)] },
-      { recursionLimit: MAX_ITERATIONS * 2 },
-    )
-
-    const lastMsg = result.messages[result.messages.length - 1]
-    const answer = String(lastMsg.content)
-    const searchLog = extractSearchLog(result.messages as any)
-
-    return JSON.stringify({
-      answer,
-      searchLog,
-    })
-  },
-  {
-    name: 'research',
-    description: '자료조사 도구. 질문을 입력하면 Wikipedia 등에서 관련 자료를 검색하고, 출처를 포함한 답변을 반환합니다.',
-    schema: z.object({
-      question: z.string().describe('조사할 질문 (구체적일수록 좋음)'),
-    }),
-  }
-)

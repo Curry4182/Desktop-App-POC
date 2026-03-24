@@ -1,6 +1,8 @@
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
+import { Command } from '@langchain/langgraph'
 import { tool } from '@langchain/core/tools'
 import { interrupt } from '@langchain/langgraph'
+import { SystemMessage } from '@langchain/core/messages'
 import { z } from 'zod'
 import { createLLM } from '../llm-factory.js'
 import {
@@ -16,8 +18,8 @@ import fs from 'fs'
 import path from 'path'
 
 const execAsync = promisify(exec)
-const MAX_ITERATIONS = parseInt(process.env.REACT_MAX_ITERATIONS || '5', 10)
 const SCRIPT_BASE_PATH = process.env.SCRIPT_BASE_PATH || './resources/scripts'
+const WINDOW_SIZE = parseInt(process.env.CONVERSATION_WINDOW_SIZE || '10', 10)
 
 const PC_FIX_SYSTEM_PROMPT = `당신은 PC 문제 진단 및 해결 전문 에이전트입니다.
 
@@ -34,7 +36,6 @@ const PC_FIX_SYSTEM_PROMPT = `당신은 PC 문제 진단 및 해결 전문 에�
 - 해결되지 않으면 대안을 제시하세요.
 - 사용자와 같은 언어로 응답하세요.`
 
-// Script runner with HITL interrupt — pauses for user confirmation
 const scriptRunnerWithConfirmTool = tool(
   async ({ scriptId }) => {
     const entry = getScriptById(scriptId)
@@ -42,7 +43,6 @@ const scriptRunnerWithConfirmTool = tool(
       return `Error: Script "${scriptId}" not found in registry.`
     }
 
-    // Interrupt for user confirmation — graph pauses here
     const confirmed = interrupt({
       type: 'confirm',
       action: entry.name,
@@ -54,7 +54,6 @@ const scriptRunnerWithConfirmTool = tool(
       return `사용자가 "${entry.name}" 실행을 취소했습니다.`
     }
 
-    // Execute the script
     const scriptPath = path.join(SCRIPT_BASE_PATH, entry.file)
     if (!fs.existsSync(scriptPath)) {
       return `Error: Script file "${entry.file}" does not exist.`
@@ -83,27 +82,38 @@ const scriptRunnerWithConfirmTool = tool(
   },
   {
     name: 'run_script_with_confirmation',
-    description: 'Execute a fix script after getting user confirmation. This will pause and ask the user to approve before running.',
+    description: 'Execute a fix script after getting user confirmation.',
     schema: z.object({
       scriptId: z.string().describe('The ID of the script to execute'),
     }),
   }
 )
 
-export function createPCFixAgent() {
-  const llm = createLLM({ temperature: 0.2 })
+const pcFixAgent = createReactAgent({
+  llm: createLLM({ temperature: 0.2 }),
+  tools: [
+    systemInfoTool,
+    installedProgramsTool,
+    networkCheckTool,
+    fullDiagnosticTool,
+    listScriptsTool,
+    scriptRunnerWithConfirmTool,
+  ],
+  prompt: (state: { messages: any[]; conversationSummary?: string }) => [
+    new SystemMessage(PC_FIX_SYSTEM_PROMPT),
+    ...(state.conversationSummary
+      ? [new SystemMessage(`[이전 대화 요약]\n${state.conversationSummary}`)]
+      : []),
+    ...state.messages.slice(-WINDOW_SIZE),
+  ],
+  name: 'pc_fix_agent',
+})
 
-  return createReactAgent({
-    llm,
-    tools: [
-      systemInfoTool,
-      installedProgramsTool,
-      networkCheckTool,
-      fullDiagnosticTool,
-      listScriptsTool,
-      scriptRunnerWithConfirmTool,
-    ],
-    prompt: PC_FIX_SYSTEM_PROMPT,
-    name: 'pc_fix_agent',
+export async function pcFixNode(state: { messages: any[]; conversationSummary?: string }) {
+  const result = await pcFixAgent.invoke(state, { recursionLimit: 15 })
+  const lastMsg = result.messages[result.messages.length - 1]
+  return new Command({
+    goto: 'supervisor',
+    update: { messages: [lastMsg] },
   })
 }
