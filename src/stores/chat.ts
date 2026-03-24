@@ -178,8 +178,8 @@ export const useChatStore = defineStore('chat', () => {
   function respondToConfirm(confirmed: boolean) {
     if (pendingConfirm.value && window.electronAPI) {
       window.electronAPI.sendConfirmResponse({
-        id: pendingConfirm.value.id,
-        confirmed,
+        id: String(pendingConfirm.value.id),
+        confirmed: !!confirmed,
       })
       pendingConfirm.value = null
     }
@@ -187,10 +187,11 @@ export const useChatStore = defineStore('chat', () => {
 
   function respondToClarify(selected: string[], freeText?: string) {
     if (pendingClarify.value && window.electronAPI) {
+      // Convert reactive proxy to plain values for IPC structured clone
       window.electronAPI.sendClarifyResponse({
-        id: pendingClarify.value.id,
-        selected,
-        freeText,
+        id: String(pendingClarify.value.id),
+        selected: [...selected],
+        freeText: freeText || undefined,
       })
       pendingClarify.value = null
     }
