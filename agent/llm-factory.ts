@@ -1,4 +1,4 @@
-import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai'
+import { ChatOpenAI } from '@langchain/openai'
 import { ChatAnthropic } from '@langchain/anthropic'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { LLMOptions } from './types.js'
@@ -29,12 +29,4 @@ export function createLLM(options: LLMOptions = {}): BaseChatModel {
         apiKey: process.env.OPENAI_API_KEY,
       })
   }
-}
-
-export function createEmbeddings(): OpenAIEmbeddings {
-  // 현재 OpenAI 임베딩만 지원 (POC)
-  return new OpenAIEmbeddings({
-    model: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
-    apiKey: process.env.OPENAI_API_KEY,
-  })
 }
