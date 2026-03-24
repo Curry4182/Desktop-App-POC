@@ -10,6 +10,7 @@ export interface ElectronAPI {
       title: string; content: string; sourceType: string;
       url?: string; documentId?: string; metadata?: Record<string, unknown>
     }>
+    tokenUsage: Record<string, { input: number; output: number }>
   }) => void) => void
   onStreamError: (callback: (data: { message: string; errorType: string }) => void) => void
   onConfirmRequest: (callback: (data: {

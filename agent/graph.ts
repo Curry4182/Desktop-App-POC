@@ -102,8 +102,9 @@ export async function* streamMessage(
   let finalResponse = ''
   let agentName: AgentName = 'chat'
   let activeNode = ''
-  let answerPhase = false   // Only stream tokens during answer generation
-  let answerComplete = false // Stop streaming after answer tool finishes
+  let answerPhase = false
+  let answerComplete = false
+  const tokenUsage: Record<string, { input: number; output: number }> = {}
   const collectedSources: Array<{
     title: string; content: string; sourceType: string;
     url?: string; documentId?: string; metadata?: Record<string, unknown>
@@ -124,6 +125,20 @@ export async function* streamMessage(
         if (event.name === 'chat' || event.name === 'pc_fix') answerPhase = true
         yield { type: 'step' as const, ...stepMap[event.name] }
       }
+    }
+
+    // Track token usage from all LLM calls
+    if (event.event === 'on_chat_model_end') {
+      try {
+        const output = event.data?.output
+        const usage = output?.usage_metadata || output?.response_metadata?.usage
+        if (usage) {
+          const node = activeNode || 'unknown'
+          if (!tokenUsage[node]) tokenUsage[node] = { input: 0, output: 0 }
+          tokenUsage[node].input += usage.input_tokens || usage.prompt_tokens || 0
+          tokenUsage[node].output += usage.output_tokens || usage.completion_tokens || 0
+        }
+      } catch { /* ignore */ }
     }
 
     // Capture LLM tool_calls to show research questions and detect answer phase
@@ -206,6 +221,7 @@ export async function* streamMessage(
     agentName,
     diagnosticResults: null,
     sources: collectedSources,
+    tokenUsage,
   }
 }
 

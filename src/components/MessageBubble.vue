@@ -37,6 +37,20 @@
       <!-- Streaming cursor — only when text is actively being written -->
       <span v-if="message.isStreaming && message.content" class="streaming-cursor">|</span>
 
+      <!-- Token usage (compact) -->
+      <div v-if="message.tokenUsage && Object.keys(message.tokenUsage).length > 0" class="token-usage">
+        <span
+          v-for="(usage, node) in message.tokenUsage"
+          :key="node"
+          class="token-item"
+        >
+          {{ nodeLabel(node) }} {{ (usage.input + usage.output).toLocaleString() }}t
+        </span>
+        <span class="token-total">
+          합계 {{ totalTokens.toLocaleString() }}t
+        </span>
+      </div>
+
       <span v-if="!message.isStreaming || message.content" class="time">{{ formatTime(message.timestamp) }}</span>
     </div>
     <div v-if="message.diagnosticResults" class="diagnostic-summary">
@@ -67,6 +81,24 @@ const props = defineProps({
 
 const showDetails = ref(false)
 const showSteps = ref(false)
+
+const NODE_LABELS = {
+  classifier: '분류',
+  research: '자료조사',
+  pc_fix: 'PC진단',
+  chat: '대화',
+  unknown: '기타',
+}
+
+function nodeLabel(node) {
+  return NODE_LABELS[node] || node
+}
+
+const totalTokens = computed(() => {
+  if (!props.message.tokenUsage) return 0
+  return Object.values(props.message.tokenUsage)
+    .reduce((sum, u) => sum + u.input + u.output, 0)
+})
 
 const lastStep = computed(() => {
   const steps = props.message.steps || []
@@ -297,6 +329,27 @@ const formattedContent = computed(() => {
   color: #64748b;
   white-space: pre;
   font-family: ui-monospace, 'Courier New', monospace;
+}
+
+/* ─── Token Usage ─── */
+.token-usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.token-item {
+  background: #f8fafc;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.token-total {
+  font-weight: 500;
+  color: #64748b;
 }
 
 /* ─── Streaming ─── */

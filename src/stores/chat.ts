@@ -17,6 +17,7 @@ interface Message {
   diagnosticResults?: unknown
   steps?: Array<{ step?: string; category?: string; summary: string }>
   sources?: ResearchSource[]
+  tokenUsage?: Record<string, { input: number; output: number }>
   isStreaming?: boolean
 }
 
@@ -82,6 +83,9 @@ export const useChatStore = defineStore('chat', () => {
         lastMsg.diagnosticResults = data.diagnosticResults
         if (data.sources && data.sources.length > 0) {
           lastMsg.sources = data.sources
+        }
+        if (data.tokenUsage && Object.keys(data.tokenUsage).length > 0) {
+          lastMsg.tokenUsage = data.tokenUsage
         }
       }
       lastAgentName.value = data.agentName

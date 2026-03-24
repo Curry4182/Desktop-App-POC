@@ -102,6 +102,7 @@ ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
             agentName: evt.agentName,
             diagnosticResults: evt.diagnosticResults ?? null,
             sources: (evt as any).sources ?? [],
+            tokenUsage: (evt as any).tokenUsage ?? {},
           })
           break
         }
