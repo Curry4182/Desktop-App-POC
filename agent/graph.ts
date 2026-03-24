@@ -7,6 +7,23 @@ import { runChatAgent } from './agents/chat-agent.js'
 import { createPCFixAgent } from './agents/pc-fix-agent.js'
 import type { AgentName } from './types.js'
 
+// ─── Langfuse Observability ───
+let langfuseHandler: any = null
+async function getLangfuseHandler(sessionId: string) {
+  if (!process.env.LANGFUSE_SECRET_KEY) return null
+  try {
+    const { CallbackHandler } = await import('langfuse-langchain')
+    return new CallbackHandler({
+      secretKey: process.env.LANGFUSE_SECRET_KEY,
+      publicKey: process.env.LANGFUSE_PUBLIC_KEY,
+      baseUrl: process.env.LANGFUSE_BASE_URL || 'https://cloud.langfuse.com',
+      sessionId,
+    })
+  } catch {
+    return null
+  }
+}
+
 // ─── Nodes ───
 
 async function classifierNode(state: typeof SupervisorAnnotation.State) {
@@ -88,6 +105,10 @@ export async function* streamMessage(
 ) {
   const app = getGraph()
 
+  // Langfuse tracing (if configured)
+  const handler = await getLangfuseHandler(threadId)
+  const callbacks = handler ? [handler] : []
+
   const stream = app.streamEvents(
     {
       messages: [...history, new HumanMessage(userMessage)],
@@ -96,6 +117,7 @@ export async function* streamMessage(
     {
       configurable: { thread_id: threadId },
       version: 'v2',
+      callbacks,
     },
   )
 

@@ -17,6 +17,7 @@
     "@langchain/openai": "^0.3.0",
     "dotenv": "^16.4.0",
     "langchain": "^0.3.0",
+    "langfuse-langchain": "^3.38.6",
     "pinia": "^2.2.0",
     "systeminformation": "^5.31.1",
     "vue": "^3.5.0",
