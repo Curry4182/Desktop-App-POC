@@ -6,6 +6,7 @@ import {
   getInstalledPrograms,
   runDiagnostics,
 } from '../agent/tools/pc-diagnostic.js'
+import { systemInfoTool, installedProgramsTool, networkCheckTool, fullDiagnosticTool } from '../agent/tools/pc-diagnostic.js'
 
 describe('PC 진단 도구', () => {
   describe('파일 경로 확인', () => {
@@ -72,6 +73,15 @@ describe('PC 진단 도구', () => {
         expect(programs[0].name).toBeDefined()
       }
     }, 15000)
+  })
+
+  describe('LangChain tool wrappers', () => {
+    it('should export valid tool objects', () => {
+      expect(systemInfoTool.name).toBe('get_system_info')
+      expect(installedProgramsTool.name).toBe('get_installed_programs')
+      expect(networkCheckTool.name).toBe('check_network')
+      expect(fullDiagnosticTool.name).toBe('run_full_diagnostic')
+    })
   })
 
   describe('전체 진단 실행', () => {

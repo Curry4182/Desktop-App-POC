@@ -242,3 +242,67 @@ export async function runDiagnostics(
 
   return result
 }
+
+// ─── LangChain Tool Wrappers ───
+
+import { tool } from '@langchain/core/tools'
+import { z } from 'zod'
+
+export const systemInfoTool = tool(
+  async () => {
+    const info = await getSystemInfo()
+    return JSON.stringify(info, null, 2)
+  },
+  {
+    name: 'get_system_info',
+    description: 'Get detailed PC system information including OS, CPU, memory, GPU, and disk usage.',
+    schema: z.object({}),
+  }
+)
+
+export const installedProgramsTool = tool(
+  async () => {
+    const programs = await getInstalledPrograms()
+    return JSON.stringify(programs, null, 2)
+  },
+  {
+    name: 'get_installed_programs',
+    description: 'List all installed programs/applications on the PC.',
+    schema: z.object({}),
+  }
+)
+
+export const networkCheckTool = tool(
+  async ({ targets }) => {
+    const parsedTargets: NetworkTarget[] = targets.map(t => {
+      if (t.includes(':')) {
+        const [host, port] = t.split(':')
+        return { host, port: parseInt(port, 10) }
+      }
+      return t
+    })
+    const results = await checkNetwork(parsedTargets)
+    return JSON.stringify(results, null, 2)
+  },
+  {
+    name: 'check_network',
+    description: 'Check network connectivity by testing DNS resolution and port reachability for given hosts.',
+    schema: z.object({
+      targets: z.array(z.string()).describe('List of hosts to check, optionally with port (e.g., "google.com", "8.8.8.8:53")'),
+    }),
+  }
+)
+
+export const fullDiagnosticTool = tool(
+  async ({ query }) => {
+    const result = await runDiagnostics(query)
+    return JSON.stringify(result, null, 2)
+  },
+  {
+    name: 'run_full_diagnostic',
+    description: 'Run a comprehensive PC diagnostic including system info, installed programs, and network checks. Use this when the user reports a general PC problem.',
+    schema: z.object({
+      query: z.string().describe('The user symptom or question that triggered this diagnostic'),
+    }),
+  }
+)
