@@ -21,12 +21,19 @@ export function createLLM(options: LLMOptions = {}): BaseChatModel {
       })
 
     case 'openai':
-    default:
+    default: {
+      const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+      const tokenLimit = options.maxTokens ?? 2048
+      // gpt-5+ models use maxCompletionTokens instead of maxTokens
+      const useCompletionTokens = model.startsWith('gpt-5') || model.startsWith('o')
       return new ChatOpenAI({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        model,
         temperature: options.temperature ?? 0.7,
-        maxTokens: options.maxTokens ?? 2048,
+        ...(useCompletionTokens
+          ? { maxCompletionTokens: tokenLimit }
+          : { maxTokens: tokenLimit }),
         apiKey: process.env.OPENAI_API_KEY,
-      })
+      } as any)
+    }
   }
 }
