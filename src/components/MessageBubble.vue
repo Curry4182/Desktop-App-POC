@@ -1,7 +1,7 @@
 <template>
   <div class="message-bubble" :class="message.role">
     <div class="bubble-content">
-      <div class="text" v-if="message.content" v-html="formattedContent"></div>
+      <div class="text" v-if="message.content" v-html="formattedContent" @click="handleContentClick"></div>
 
       <!-- Source badges (clickable) -->
       <div v-if="message.sources && message.sources.length > 0" class="source-badges">
@@ -122,12 +122,17 @@ function stepClass(step) {
 
 const formattedContent = computed(() => {
   let text = props.message.content || ''
-  // Remove source/reference lines
-  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\([^)]*\),?\s*/gm, '')
-  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\s*$/gm, '')
-  text = text.replace(/\[출처:[^\]]*\]\([^)]*\),?\s*/g, '')
-  text = text.replace(/\[출처:[^\]]*-\s*https?:\/\/[^\]]*\],?\s*/g, '')
-  text = text.replace(/\[출처:[^\]]*\],?\s*/g, '')
+
+  // Remove standalone source lines (bullet points with only source references)
+  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\([^)]*\)\s*$/gm, '')
+  text = text.replace(/^[-*]?\s*출처:[^\n]*$/gm, '')
+
+  // Convert inline [출처: title] to clickable badges
+  text = text.replace(/\[출처:\s*([^\]]+)\]/g, (_match, title) => {
+    const trimmed = title.trim()
+    return `<button class="inline-source-badge" data-source-title="${trimmed}">${trimmed}</button>`
+  })
+
   text = text.replace(/\n{3,}/g, '\n\n')
   text = text.trim()
   // Markdown formatting
@@ -137,6 +142,21 @@ const formattedContent = computed(() => {
   text = text.replace(/\n/g, '<br>')
   return text
 })
+
+function handleContentClick(event) {
+  const badge = event.target.closest('.inline-source-badge')
+  if (badge) {
+    const title = badge.dataset.sourceTitle
+    const sources = props.message.sources || []
+    const found = sources.find(s => s.title === title)
+    if (found) {
+      selectedSource.value = found
+    } else {
+      // Source not in list yet — show with title only
+      selectedSource.value = { title, content: '문서 내용을 불러오는 중...', sourceType: 'other' }
+    }
+  }
+}
 </script>
 
 <style scoped>
@@ -195,6 +215,25 @@ const formattedContent = computed(() => {
   font-size: 12px;
   font-family: ui-monospace, 'Courier New', monospace;
   color: #002C5F;
+}
+
+/* ─── Inline Source Badges (in answer text) ─── */
+:deep(.inline-source-badge) {
+  display: inline;
+  background: #f0f4ff;
+  border: 1px solid #d0daf0;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #002C5F;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 1px 6px;
+  margin: 0 2px;
+  transition: all 0.15s;
+}
+:deep(.inline-source-badge:hover) {
+  background: #dbe4ff;
+  border-color: #002C5F;
 }
 
 /* ─── Source Badges ─── */

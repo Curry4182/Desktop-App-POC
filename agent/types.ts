@@ -128,7 +128,7 @@ export type AgentRoute = AgentName | '__end__'
 export type CustomStreamEvent =
   | { type: 'search_start'; query: string }
   | { type: 'search_result'; titles: string[]; count: number }
-  | { type: 'source_found'; title: string; url: string; snippet: string }
+  | { type: 'source_found'; title: string; url?: string; snippet: string }
   | { type: 'research_step'; step: string }
 
 // ─── Human-in-the-Loop ───

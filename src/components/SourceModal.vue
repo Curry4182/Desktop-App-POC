@@ -58,7 +58,7 @@ defineEmits<{ close: [] }>()
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
   wikipedia: 'Wikipedia',
-  internal_api: '내부 문서',
+  internal: '사내 정보',
   other: '기타',
 }
 
