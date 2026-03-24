@@ -65,7 +65,7 @@ const props = defineProps({
 })
 
 const showDetails = ref(false)
-const showSteps = ref(false)
+const showSteps = ref(true)
 const selectedSource = ref(null)
 
 function toggleDetails() {

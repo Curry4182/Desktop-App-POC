@@ -102,7 +102,8 @@ export async function* streamMessage(
   let finalResponse = ''
   let agentName: AgentName = 'chat'
   let activeNode = ''
-  let answerPhase = false  // Only stream tokens during answer generation
+  let answerPhase = false   // Only stream tokens during answer generation
+  let answerComplete = false // Stop streaming after answer tool finishes
   const collectedSources: Array<{
     title: string; content: string; sourceType: string;
     url?: string; documentId?: string; metadata?: Record<string, unknown>
@@ -140,6 +141,13 @@ export async function* streamMessage(
           }
         }
       } catch { /* ignore */ }
+    }
+
+    // Detect when generate_answer tool finishes → stop streaming after that
+    if (event.event === 'on_tool_end' && answerPhase) {
+      // The generate_answer tool output is plain text (not JSON)
+      // Once it completes, any further LLM tokens are Supervisor's repeat → block them
+      answerComplete = true
     }
 
     // Capture research tool results — extract search keywords + found documents
@@ -182,7 +190,7 @@ export async function* streamMessage(
       const tags: string[] = event.tags || []
       const isClassifierLLM = tags.some(t => t.includes('classifier')) || activeNode === 'classifier'
 
-      if (!isClassifierLLM && answerPhase) {
+      if (!isClassifierLLM && answerPhase && !answerComplete) {
         const content = event.data.chunk.content
         if (typeof content === 'string' && content) {
           finalResponse += content
