@@ -78,11 +78,13 @@ function formatTime(ts) {
 const formattedContent = computed(() => {
   let text = props.message.content || ''
 
-  // Remove source lines from text (they're shown as badges now)
-  text = text.replace(/^-?\s*\[출처:.*?\].*$/gm, '')
-  text = text.replace(/^-?\s*\[출처:.*?\(.*?\)\].*$/gm, '')
-  // Also remove markdown link source patterns: - [출처: Title](url)
-  text = text.replace(/^-?\s*\[출처:.*?\]\(.*?\)\s*$/gm, '')
+  // Remove source/reference lines from text (they're shown as badges now)
+  // Pattern: [출처: ...], [출처: ... - URL], [출처: Title](url), - [출처: ...]
+  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\([^)]*\),?\s*/gm, '')   // markdown links
+  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\s*$/gm, '')              // plain brackets
+  text = text.replace(/\[출처:[^\]]*\]\([^)]*\),?\s*/g, '')              // inline markdown links
+  text = text.replace(/\[출처:[^\]]*-\s*https?:\/\/[^\]]*\],?\s*/g, '')  // [출처: Title - URL]
+  text = text.replace(/\[출처:[^\]]*\],?\s*/g, '')                        // any remaining [출처: ...]
   // Clean up multiple consecutive blank lines
   text = text.replace(/\n{3,}/g, '\n\n')
   text = text.trim()

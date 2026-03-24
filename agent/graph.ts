@@ -123,24 +123,30 @@ export async function* streamMessage(
       }
     }
 
-    // Capture tool invocations — show search keywords in UI
-    if (event.event === 'on_tool_start' && event.name === 'wiki_search') {
+    // Capture tool invocations — show search keywords and research questions
+    if (event.event === 'on_tool_start') {
       const input = event.data?.input
-      const query = typeof input === 'object' ? input?.query : String(input)
-      if (query) {
-        yield { type: 'step' as const, step: 'observation' as const, summary: `🔍 "${query}" 검색 중...` }
+      if (event.name === 'wiki_search' && input) {
+        const query = typeof input === 'object' ? input.query : String(input)
+        if (query) {
+          yield { type: 'step' as const, step: 'observation' as const, summary: `🔍 "${query}" 키워드로 검색 중...` }
+        }
+      } else if (event.name === 'research' && input) {
+        const question = typeof input === 'object' ? input.question : String(input)
+        if (question) {
+          yield { type: 'step' as const, step: 'action' as const, summary: `📝 조사 질문: "${question}"` }
+        }
       }
     }
 
-    // Capture tool results — collect structured sources
+    // Capture tool results — collect structured sources (skip 0 results)
     if (event.event === 'on_tool_end' && event.name === 'wiki_search') {
       try {
         const output = event.data?.output
         const text = typeof output === 'string' ? output : output?.content || ''
         const parsed = JSON.parse(text)
-        if (parsed.sources && Array.isArray(parsed.sources)) {
+        if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
           for (const src of parsed.sources) {
-            // Deduplicate by documentId or title
             if (!collectedSources.some(s => s.documentId === src.documentId || s.title === src.title)) {
               collectedSources.push(src)
             }
