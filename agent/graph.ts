@@ -102,8 +102,7 @@ export async function* streamMessage(
   let finalResponse = ''
   let agentName: AgentName = 'chat'
   let activeNode = ''
-  let answerPhase = false
-  let answerComplete = false
+  let isResearchNode = false // research node doesn't stream — captures final response at end
   const tokenUsage: Record<string, { input: number; output: number }> = {}
   const collectedSources: Array<{
     title: string; content: string; sourceType: string;
@@ -122,7 +121,7 @@ export async function* streamMessage(
       if (stepMap[event.name]) {
         activeNode = event.name
         if (event.name !== 'classifier') agentName = event.name as AgentName
-        if (event.name === 'chat' || event.name === 'pc_fix') answerPhase = true
+        if (event.name === 'research') isResearchNode = true
         yield { type: 'step' as const, ...stepMap[event.name] }
       }
     }
@@ -141,7 +140,7 @@ export async function* streamMessage(
       } catch { /* ignore */ }
     }
 
-    // Capture LLM tool_calls to show research questions and detect answer phase
+    // Capture LLM tool_calls to show research questions and answer phase
     if (event.event === 'on_chat_model_end' && activeNode === 'research') {
       try {
         const output = event.data?.output
@@ -151,35 +150,19 @@ export async function* streamMessage(
             yield { type: 'step' as const, category: 'research', summary: tc.args.question }
           }
           if (tc.name === 'generate_answer') {
-            answerPhase = true
             yield { type: 'step' as const, category: 'answer', summary: '답변 생성 중' }
           }
         }
       } catch { /* ignore */ }
     }
 
-    // Capture generate_answer output directly (its internal LLM doesn't stream tokens)
-    if (event.event === 'on_tool_end' && answerPhase && !answerComplete) {
-      try {
-        const output = event.data?.output
-        const text = typeof output === 'string' ? output : output?.content || ''
-        // generate_answer returns plain text (not JSON) — use as final response
-        if (text && !text.startsWith('{')) {
-          finalResponse = text
-          yield { type: 'token' as const, content: text }
-        }
-      } catch { /* ignore */ }
-      answerComplete = true
-    }
-
-    // Capture research tool results — extract search keywords + found documents
+    // Capture tool results — extract search keywords + found documents
     if (event.event === 'on_tool_end') {
       try {
         const output = event.data?.output
         const text = typeof output === 'string' ? output : output?.content || ''
         const parsed = JSON.parse(text)
 
-        // Research tool returns { answer, searchLog: { keywords, foundDocuments } }
         if (parsed.searchLog) {
           const { keywords, foundDocuments } = parsed.searchLog
           if (keywords && keywords.length > 0) {
@@ -206,13 +189,24 @@ export async function* streamMessage(
       } catch { /* non-JSON tool output, ignore */ }
     }
 
-    // Stream LLM tokens — only during answer phase (or chat/pc_fix nodes)
-    // During research phase, intermediate text is hidden (shown only in steps)
-    if (event.event === 'on_chat_model_stream' && event.data?.chunk) {
+    // Capture research node's final response when it completes
+    if (event.event === 'on_chain_end' && event.name === 'research' && isResearchNode) {
+      try {
+        const output = event.data?.output
+        const response = output?.response
+        if (typeof response === 'string' && response) {
+          finalResponse = response
+          yield { type: 'token' as const, content: response }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Stream LLM tokens — only for chat/pc_fix (NOT research)
+    if (!isResearchNode && event.event === 'on_chat_model_stream' && event.data?.chunk) {
       const tags: string[] = event.tags || []
       const isClassifierLLM = tags.some(t => t.includes('classifier')) || activeNode === 'classifier'
 
-      if (!isClassifierLLM && answerPhase && !answerComplete) {
+      if (!isClassifierLLM) {
         const content = event.data.chunk.content
         if (typeof content === 'string' && content) {
           finalResponse += content
