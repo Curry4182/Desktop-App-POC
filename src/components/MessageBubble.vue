@@ -11,28 +11,30 @@
           class="source-badge"
           @click="selectedSource = src"
         >
-          <span class="badge-icon">📄</span>
           {{ src.title }}
         </button>
       </div>
 
-      <!-- ReAct steps (collapsible) -->
-      <div v-if="message.steps && message.steps.length > 0" class="react-steps">
+      <!-- Processing steps (collapsible, hierarchical) -->
+      <div v-if="message.steps && message.steps.length > 0" class="process-steps">
         <div class="step-toggle" @click="showSteps = !showSteps">
-          {{ showSteps ? '▼' : '▶' }} 처리 과정 ({{ message.steps.length }}단계)
+          <span class="toggle-arrow">{{ showSteps ? '▾' : '▸' }}</span>
+          처리 과정
         </div>
-        <div v-if="showSteps" class="steps-list">
-          <div v-for="(step, i) in message.steps" :key="i" class="step-item">
-            <span class="step-icon">
-              {{ step.step === 'thinking' ? '🤔' : step.step === 'action' ? '🔍' : '📄' }}
-            </span>
-            {{ step.summary }}
+        <div v-if="showSteps" class="steps-tree">
+          <div
+            v-for="(step, i) in message.steps"
+            :key="i"
+            class="step-node"
+            :class="stepClass(step)"
+          >
+            <span class="step-label">{{ step.summary }}</span>
           </div>
         </div>
       </div>
 
       <!-- Streaming cursor -->
-      <span v-if="message.isStreaming" class="streaming-cursor">▌</span>
+      <span v-if="message.isStreaming" class="streaming-cursor">|</span>
 
       <span class="time">{{ formatTime(message.timestamp) }}</span>
     </div>
@@ -75,20 +77,21 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 }
 
+function stepClass(step) {
+  // category: system (top-level), research (indent 1), search (indent 2), answer (top-level)
+  return `step-${step.category || step.step || 'system'}`
+}
+
 const formattedContent = computed(() => {
   let text = props.message.content || ''
-
-  // Remove source/reference lines from text (they're shown as badges now)
-  // Pattern: [출처: ...], [출처: ... - URL], [출처: Title](url), - [출처: ...]
-  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\([^)]*\),?\s*/gm, '')   // markdown links
-  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\s*$/gm, '')              // plain brackets
-  text = text.replace(/\[출처:[^\]]*\]\([^)]*\),?\s*/g, '')              // inline markdown links
-  text = text.replace(/\[출처:[^\]]*-\s*https?:\/\/[^\]]*\],?\s*/g, '')  // [출처: Title - URL]
-  text = text.replace(/\[출처:[^\]]*\],?\s*/g, '')                        // any remaining [출처: ...]
-  // Clean up multiple consecutive blank lines
+  // Remove source/reference lines
+  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\([^)]*\),?\s*/gm, '')
+  text = text.replace(/^[-*]?\s*\[출처:[^\]]*\]\s*$/gm, '')
+  text = text.replace(/\[출처:[^\]]*\]\([^)]*\),?\s*/g, '')
+  text = text.replace(/\[출처:[^\]]*-\s*https?:\/\/[^\]]*\],?\s*/g, '')
+  text = text.replace(/\[출처:[^\]]*\],?\s*/g, '')
   text = text.replace(/\n{3,}/g, '\n\n')
   text = text.trim()
-
   // Markdown formatting
   text = text.replace(/```[\s\S]*?```/g, (m) => `<pre class="code-block">${m.replace(/```\w*\n?/g, '')}</pre>`)
   text = text.replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -104,14 +107,8 @@ const formattedContent = computed(() => {
   flex-direction: column;
   max-width: 76%;
 }
-
-.message-bubble.user {
-  align-self: flex-end;
-}
-
-.message-bubble.assistant {
-  align-self: flex-start;
-}
+.message-bubble.user { align-self: flex-end; }
+.message-bubble.assistant { align-self: flex-start; }
 
 .bubble-content {
   padding: 10px 14px;
@@ -119,13 +116,11 @@ const formattedContent = computed(() => {
   font-size: 14px;
   line-height: 1.6;
 }
-
 .user .bubble-content {
   background: #002C5F;
   color: #ffffff;
   border-bottom-right-radius: 4px;
 }
-
 .assistant .bubble-content {
   background: #ffffff;
   color: #1e293b;
@@ -140,7 +135,6 @@ const formattedContent = computed(() => {
   opacity: 0.5;
   text-align: right;
 }
-
 .user .time { color: #1e293b; }
 .assistant .time { color: #64748b; }
 
@@ -156,7 +150,6 @@ const formattedContent = computed(() => {
   font-family: ui-monospace, 'Courier New', monospace;
   color: #1e293b;
 }
-
 :deep(code) {
   background: #f1f5f9;
   padding: 1px 5px;
@@ -175,7 +168,6 @@ const formattedContent = computed(() => {
   padding-top: 8px;
   border-top: 1px solid #f0f0f0;
 }
-
 .source-badge {
   display: inline-flex;
   align-items: center;
@@ -190,17 +182,76 @@ const formattedContent = computed(() => {
   font-family: inherit;
   transition: all 0.15s;
 }
-
 .source-badge:hover {
   background: #dbe4ff;
   border-color: #002C5F;
 }
 
-.badge-icon { font-size: 13px; }
+/* ─── Processing Steps (hierarchical tree) ─── */
+.process-steps {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.step-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #94a3b8;
+  user-select: none;
+}
+.step-toggle:hover { color: #64748b; }
+.toggle-arrow { font-size: 10px; width: 12px; }
+
+.steps-tree {
+  margin-top: 6px;
+}
+
+.step-node {
+  font-size: 12px;
+  color: #64748b;
+  padding: 2px 0;
+  line-height: 1.5;
+}
+
+.step-label {
+  display: inline;
+}
+
+/* Hierarchy indentation */
+.step-system {
+  color: #94a3b8;
+  font-weight: 500;
+  padding-top: 4px;
+}
+.step-system:first-child { padding-top: 0; }
+
+.step-research {
+  padding-left: 16px;
+  color: #475569;
+  border-left: 2px solid #e2e8f0;
+  margin-left: 4px;
+}
+
+.step-search {
+  padding-left: 32px;
+  color: #94a3b8;
+  font-size: 11px;
+  border-left: 2px solid #f1f5f9;
+  margin-left: 4px;
+}
+
+.step-answer {
+  color: #002C5F;
+  font-weight: 500;
+  padding-top: 4px;
+}
 
 /* ─── Diagnostic ─── */
 .diagnostic-summary { margin-top: 6px; }
-
 .toggle-btn {
   font-size: 12px;
   font-family: 'Pretendard', inherit;
@@ -212,12 +263,10 @@ const formattedContent = computed(() => {
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
-
 .toggle-btn:hover {
   border-color: #002C5F;
   color: #002C5F;
 }
-
 .diagnostic-json {
   margin-top: 6px;
   background: #f8fafc;
@@ -233,13 +282,11 @@ const formattedContent = computed(() => {
   font-family: ui-monospace, 'Courier New', monospace;
 }
 
-/* ─── ReAct Steps ─── */
-.react-steps { margin-top: 8px; font-size: 0.85rem; }
-.step-toggle { cursor: pointer; color: #888; user-select: none; }
-.step-toggle:hover { color: #555; }
-.steps-list { margin-top: 4px; padding-left: 8px; border-left: 2px solid #e0e0e0; }
-.step-item { padding: 4px 0; display: flex; align-items: center; gap: 6px; }
-.step-icon { font-size: 0.9rem; }
-.streaming-cursor { animation: blink 0.8s infinite; color: #4a90d9; }
+/* ─── Streaming ─── */
+.streaming-cursor {
+  animation: blink 0.8s infinite;
+  color: #4a90d9;
+  font-weight: 300;
+}
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 </style>

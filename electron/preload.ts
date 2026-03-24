@@ -1,7 +1,7 @@
 export interface ElectronAPI {
   sendMessage: (message: string, searchEnabled?: boolean) => void
   onStreamToken: (callback: (data: { content: string }) => void) => void
-  onStreamStep: (callback: (data: { step: string; summary: string }) => void) => void
+  onStreamStep: (callback: (data: { category?: string; summary: string }) => void) => void
   onStreamDone: (callback: (data: {
     response: string
     agentName: string

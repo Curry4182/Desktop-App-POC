@@ -15,7 +15,7 @@ interface Message {
   content: string
   timestamp: number
   diagnosticResults?: unknown
-  steps?: Array<{ step: string; summary: string }>
+  steps?: Array<{ step?: string; category?: string; summary: string }>
   sources?: ResearchSource[]
   isStreaming?: boolean
 }

@@ -111,18 +111,17 @@ export async function* streamMessage(
   for await (const event of stream) {
     // Track which node is currently executing
     if (event.event === 'on_chain_start' && event.name) {
-      const stepMap: Record<string, string> = {
-        classifier: '메시지를 분석하고 있습니다...',
-        research: '자료조사 에이전트가 처리 중...',
-        pc_fix: 'PC 진단 에이전트가 처리 중...',
-        chat: '응답을 생성하고 있습니다...',
+      const stepMap: Record<string, { summary: string; category: string }> = {
+        classifier: { summary: '메시지 분석 중', category: 'system' },
+        research: { summary: '자료조사 에이전트', category: 'system' },
+        pc_fix: { summary: 'PC 진단 에이전트', category: 'system' },
+        chat: { summary: '응답 생성 중', category: 'system' },
       }
       if (stepMap[event.name]) {
         activeNode = event.name
         if (event.name !== 'classifier') agentName = event.name as AgentName
-        // For chat and pc_fix, stream tokens immediately (no answer phase needed)
         if (event.name === 'chat' || event.name === 'pc_fix') answerPhase = true
-        yield { type: 'step' as const, step: 'action' as const, summary: stepMap[event.name] }
+        yield { type: 'step' as const, ...stepMap[event.name] }
       }
     }
 
@@ -133,11 +132,11 @@ export async function* streamMessage(
         const toolCalls = output?.tool_calls || output?.additional_kwargs?.tool_calls || []
         for (const tc of toolCalls) {
           if (tc.name === 'research' && tc.args?.question) {
-            yield { type: 'step' as const, step: 'action' as const, summary: `📝 조사 질문: "${tc.args.question}"` }
+            yield { type: 'step' as const, category: 'research', summary: tc.args.question }
           }
           if (tc.name === 'generate_answer') {
             answerPhase = true
-            yield { type: 'step' as const, step: 'action' as const, summary: `✍️ 답변을 생성하고 있습니다...` }
+            yield { type: 'step' as const, category: 'answer', summary: '답변 생성 중' }
           }
         }
       } catch { /* ignore */ }
@@ -154,11 +153,11 @@ export async function* streamMessage(
         if (parsed.searchLog) {
           const { keywords, foundDocuments } = parsed.searchLog
           if (keywords && keywords.length > 0) {
-            yield { type: 'step' as const, step: 'observation' as const, summary: `🔍 검색 키워드: ${keywords.map((k: string) => `"${k}"`).join(', ')}` }
+            yield { type: 'step' as const, category: 'search', summary: `검색: ${keywords.map((k: string) => `"${k}"`).join(', ')}` }
           }
           if (foundDocuments && foundDocuments.length > 0) {
             const titles = foundDocuments.map((d: { title: string }) => d.title).join(', ')
-            yield { type: 'step' as const, step: 'observation' as const, summary: `📄 ${foundDocuments.length}개 문서 발견: ${titles}` }
+            yield { type: 'step' as const, category: 'search', summary: `${foundDocuments.length}개 문서: ${titles}` }
             for (const doc of foundDocuments) {
               if (!collectedSources.some(s => s.title === doc.title)) {
                 collectedSources.push(doc)

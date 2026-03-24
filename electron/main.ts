@@ -92,7 +92,7 @@ ipcMain.on('agent:message', async (event, { message, searchEnabled }) => {
           win.webContents.send('agent:stream:token', { content: evt.content })
           break
         case 'step':
-          win.webContents.send('agent:stream:step', { step: evt.step, summary: evt.summary })
+          win.webContents.send('agent:stream:step', { category: (evt as any).category, summary: evt.summary })
           break
         case 'done': {
           const { AIMessage } = await import('@langchain/core/messages')
