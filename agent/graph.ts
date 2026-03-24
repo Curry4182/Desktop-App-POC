@@ -158,10 +158,17 @@ export async function* streamMessage(
       } catch { /* ignore */ }
     }
 
-    // Detect when generate_answer tool finishes → stop streaming after that
-    if (event.event === 'on_tool_end' && answerPhase) {
-      // The generate_answer tool output is plain text (not JSON)
-      // Once it completes, any further LLM tokens are Supervisor's repeat → block them
+    // Capture generate_answer output directly (its internal LLM doesn't stream tokens)
+    if (event.event === 'on_tool_end' && answerPhase && !answerComplete) {
+      try {
+        const output = event.data?.output
+        const text = typeof output === 'string' ? output : output?.content || ''
+        // generate_answer returns plain text (not JSON) — use as final response
+        if (text && !text.startsWith('{')) {
+          finalResponse = text
+          yield { type: 'token' as const, content: text }
+        }
+      } catch { /* ignore */ }
       answerComplete = true
     }
 
