@@ -99,22 +99,6 @@ export interface DiagnosticResult {
 }
 
 // ──────────────────────────────────────────────
-// UI 액션
-// ──────────────────────────────────────────────
-export type UIActionName =
-  | 'openDiagnosticPanel'
-  | 'closeDiagnosticPanel'
-  | 'clearChat'
-  | 'startDiagnostics'
-  | 'exportReport'
-  | 'scrollToTop'
-
-export interface UIAction {
-  action: UIActionName
-  params?: Record<string, unknown>
-}
-
-// ──────────────────────────────────────────────
 // LLM 팩토리 옵션
 // ──────────────────────────────────────────────
 export interface LLMOptions {
@@ -122,16 +106,87 @@ export interface LLMOptions {
   maxTokens?: number
 }
 
-// ──────────────────────────────────────────────
-// LangGraph 상태
-// ──────────────────────────────────────────────
-export type RouteType = 'rag' | 'diagnostic' | 'ui_action' | 'chat'
+// ─── Script Registry ───
+export interface ScriptEntry {
+  id: string
+  name: string
+  description: string
+  file: string
+  platform: 'windows' | 'macos' | 'linux'
+  symptoms: string[]
+  category: string
+}
 
-export interface AgentState {
+export interface ScriptRegistry {
+  scripts: ScriptEntry[]
+}
+
+// ─── Streaming ───
+export type StreamEventType = 'token' | 'step' | 'done' | 'error'
+
+export interface StreamToken {
+  type: 'token'
+  content: string
+}
+
+export interface StreamStep {
+  type: 'step'
+  step: 'thinking' | 'action' | 'observation'
+  summary: string
+}
+
+export interface StreamDone {
+  type: 'done'
+  response: string
+  diagnosticResults?: DiagnosticResult | null
+}
+
+export interface StreamError {
+  type: 'error'
+  message: string
+  errorType: 'api_error' | 'timeout' | 'script_error' | 'unknown'
+}
+
+export type StreamEvent = StreamToken | StreamStep | StreamDone | StreamError
+
+// ─── Human-in-the-Loop ───
+export interface ConfirmRequest {
+  id: string
+  action: string
+  description: string
+  scriptId?: string
+}
+
+export interface ConfirmResponse {
+  id: string
+  confirmed: boolean
+}
+
+export interface ClarifyOption {
+  label: string
+  value: string
+}
+
+export interface ClarifyRequest {
+  id: string
+  question: string
+  options: ClarifyOption[]
+}
+
+export interface ClarifyResponse {
+  id: string
+  selected: string[]
+  freeText?: string
+}
+
+// ─── Agent State ───
+export type AgentName = 'search' | 'pc_fix' | 'chat'
+
+export interface SupervisorState {
   messages: BaseMessage[]
-  route?: RouteType
-  ragContext?: string
-  diagnosticResult?: DiagnosticResult
-  uiAction?: UIAction
-  response?: string
+  agentName: AgentName | null
+  response: string | null
+  diagnosticResults: DiagnosticResult | null
+  searchEnabled: boolean
+  summary: string | null
 }
