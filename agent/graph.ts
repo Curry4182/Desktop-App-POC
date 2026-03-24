@@ -11,11 +11,9 @@ import type { AgentName } from './types.js'
 
 async function classifierNode(state: typeof SupervisorAnnotation.State) {
   const lastMessage = state.messages[state.messages.length - 1]
-  const hasHistory = state.messages.length > 1
   const agentName = await classifyRoute(
     String(lastMessage.content),
     state.searchEnabled,
-    hasHistory,
   )
   return { agentName }
 }

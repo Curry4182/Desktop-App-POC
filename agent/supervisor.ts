@@ -1,85 +1,33 @@
 import { createLLM } from './llm-factory.js'
 import { SystemMessage, HumanMessage } from '@langchain/core/messages'
-import { interrupt } from '@langchain/langgraph'
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
 import { researchTool } from './agents/research-agent.js'
 import { generateAnswerTool } from './agents/answer-agent.js'
 import { askUserTool } from './tools/ask-user.js'
 import type { AgentName } from './types.js'
 
-const MAX_ITERATIONS = parseInt(process.env.REACT_MAX_ITERATIONS || '5', 10)
-
-// ─── Classification (quick LLM call to decide route) ───
+// ─── Classifier: 라우팅만 담당 (보충 질문 없음) ───
 
 const CLASSIFY_PROMPT = `사용자 메시지를 분석하여 처리 방식을 결정하세요.
 
 응답 형식 (JSON만):
-{
-  "route": "research" | "pc_fix" | "chat",
-  "clarify": false,
-  "clarifyQuestion": "",
-  "clarifyOptions": []
-}
+{"route": "research" | "pc_fix" | "chat"}
 
 라우팅 규칙:
-- "research": 지식 검색, 자료조사, 정보 탐색이 필요한 질문
+- "research": 지식 검색, 자료조사, 정보 탐색, 모호한 질문 (보충 질문은 research 에이전트가 처리)
 - "pc_fix": PC 문제 진단/해결 (시스템, 소프트웨어, 네트워크, 디스크)
-- "chat": 일반 대화, 인사, 간단한 질문
+- "chat": 일반 대화, 인사
 
-## 보충 질문 (clarify) 판단 기준
+모호하거나 불명확한 질문도 "research"로 라우팅하세요.
+research 에이전트가 사용자에게 보충 질문을 할 수 있습니다.
 
-아래 경우에 반드시 clarify=true로 설정하세요:
-
-1. 지시 대상이 불명확: "그것", "그 음식", "저거" 등 대명사가 특정 대상을 가리키지만 맥락에서 파악 불가
-2. 범위가 너무 넓음: "문제점이 뭐야" — 어떤 관점의 문제인지 불분명 (건강? 비용? 환경? 품질?)
-3. 여러 해석 가능: 질문이 2가지 이상으로 해석될 수 있을 때
-4. 핵심 정보 누락: 답변에 필요한 핵심 정보(대상, 조건, 맥락)가 빠져 있을 때
-
-### 보충 질문 작성 규칙
-- clarifyQuestion: 무엇이 불명확한지 구체적으로 질문
-- clarifyOptions: 3~5개의 구체적 선택지 (label + value)
-- 마지막 선택지는 항상 "직접 입력" 옵션
-
-### 예시
-
-입력: "배고파서 음식을 시킬려고 하는데 그 음식의 문제점이 뭘까?"
-→ clarify=true
-→ clarifyQuestion: "어떤 음식에 대해 알고 싶으신가요?"
-→ clarifyOptions: [
-    {"label": "배달 음식 전반", "value": "배달 음식"},
-    {"label": "패스트푸드", "value": "패스트푸드"},
-    {"label": "인스턴트 식품", "value": "인스턴트 식품"},
-    {"label": "직접 입력", "value": ""}
-  ]
-
-입력: "저거 어떻게 해결해?"
-→ clarify=true (대명사 "저거"가 무엇인지 불명확)
-
-입력: "CAD의 창시자는 누구야?"
-→ clarify=false (명확한 질문)
-
-입력: "컴퓨터가 느려요"
-→ clarify=false → route: "pc_fix" (PC 진단으로 해결 가능)
-
-중요: 모호한 질문에는 반드시 clarify=true를 설정하세요.
-대명사("그거", "저거", "그 음식")가 맥락 없이 사용되면 반드시 clarify=true입니다.
-"문제점", "해결", "알려줘" 같은 범용 표현이 대상 없이 쓰이면 반드시 clarify=true입니다.
-
-JSON만 반환하세요. markdown 코드블록 없이 순수 JSON만 반환하세요.`
+JSON만 반환하세요.`
 
 const VALID_AGENTS: AgentName[] = ['research', 'pc_fix', 'chat']
-
-interface ClassifyResult {
-  route: AgentName
-  clarify: boolean
-  clarifyQuestion?: string
-  clarifyOptions?: Array<{ label: string; value: string }>
-}
 
 export async function classifyRoute(
   userMessage: string,
   searchEnabled: boolean,
-  hasHistory: boolean = false,
 ): Promise<AgentName> {
   const llm = createLLM({ temperature: 0 })
 
@@ -91,42 +39,7 @@ export async function classifyRoute(
   try {
     const rawContent = String(response.content)
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/)
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawContent) as ClassifyResult
-
-    // Handle clarification (from LLM or forced)
-    if (parsed.clarify && parsed.clarifyQuestion) {
-      const userChoice = interrupt({
-        type: 'clarify',
-        question: parsed.clarifyQuestion,
-        options: parsed.clarifyOptions || [],
-      })
-      return classifyRoute(`${userMessage} (보충: ${userChoice})`, searchEnabled)
-    }
-
-    // Fallback: programmatic ambiguity detection if LLM didn't flag it
-    if (!parsed.clarify) {
-      const ambiguousPronouns = /(?:그것|그거|저거|저것|그\s?음식|그\s?문제|그\s?사람|이것|이거)/.test(userMessage)
-      const vaguePhrases = !hasHistory && /(?:어떻게|문제점|해결|알려줘|뭘까|뭐야)\s*[?？]?\s*$/.test(userMessage)
-      const tooShort = !hasHistory && userMessage.replace(/[?？!！.\s]/g, '').length < 6
-
-      if (ambiguousPronouns || (vaguePhrases && tooShort)) {
-        const userChoice = interrupt({
-          type: 'clarify' as const,
-          question: ambiguousPronouns
-            ? '어떤 대상에 대해 물어보시는 건가요?'
-            : '조금 더 구체적으로 알려주시겠어요?',
-          options: [
-            { label: '직접 입력', value: '' },
-          ],
-        })
-        // Resume: re-classify with user's clarification
-        return classifyRoute(
-          `${userMessage} (보충: ${userChoice})`,
-          searchEnabled,
-          hasHistory,
-        )
-      }
-    }
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawContent)
 
     let route = VALID_AGENTS.includes(parsed.route) ? parsed.route : 'chat'
     if (route === 'research' && !searchEnabled) route = 'chat'
@@ -136,82 +49,63 @@ export async function classifyRoute(
   }
 }
 
-// ─── Supervisor ReAct Agent (for research route) ───
-// Supervisor generates multiple research questions and calls research tool for each
+// ─── Supervisor ReAct Agent ───
+// 모든 보충 질문(ask_user), 자료조사(research), 답변 생성(generate_answer)을 담당
 
 const SUPERVISOR_REACT_PROMPT = `당신은 CAD 설계 어시스턴트의 Supervisor입니다.
-사용자의 질문에 답하기 위해 자료조사를 수행하고 답변을 생성합니다.
+사용자의 질문을 분석하고, 필요 시 보충 질문을 하고, 자료를 조사하고, 답변을 생성합니다.
 
 ## 도구
-1. research: 질문에 대한 자료를 검색합니다
-2. generate_answer: 수집된 자료로 최종 답변을 생성합니다
-3. ask_user: 조사 중 사용자에게 보충 질문이 필요할 때 사용합니다
+1. ask_user: 사용자에게 보충 질문 (선택지 제시)
+2. research: 자료 검색
+3. generate_answer: 최종 답변 생성
 
-## ask_user 사용 시점
-- 조건 분해 후, 교집합 후보가 여러 개일 때: "미국과 프랑스 중 어느 나라에 대해 알고 싶으신가요?"
-- 검색 결과가 모호하거나 여러 해석이 가능할 때
-- 사용자 의도가 불분명하여 조사 방향을 정할 수 없을 때
+## 작업 흐름 (반드시 순서대로)
 
-주의: 불필요한 보충 질문은 하지 마세요. 자료로 판단 가능하면 바로 진행하세요.
+### 0단계: 질문 분석 — ask_user 필요 여부 판단
+사용자 질문을 받으면 먼저 아래를 확인하세요:
+- 대상이 불명확한가? ("그 음식", "저거", "그것" → 무엇을 가리키는지 모름)
+- 범위가 너무 넓은가? ("문제점이 뭐야" → 어떤 관점?)
+- 여러 해석이 가능한가? ("Apple" → 과일? 회사?)
+- 핵심 정보가 빠져있는가?
 
-## 핵심 원칙: 인과 체인 추론
+위 중 하나라도 해당하면 → ask_user로 보충 질문
+해당 없으면 → 1단계로 바로 진행
 
-모든 조건이 답변의 필수 구성요소가 되어야 합니다.
-"이 조건을 빼도 답이 되는가?" → YES면 잘못된 답변입니다.
+### 1단계: 조건 분해 + 순차 조사
+- 질문의 조건을 분해하고, 의존 순서대로 research 호출
+- 이전 결과를 다음 질문에 반영
+- 조사 중 여러 후보가 나오면 → ask_user로 사용자에게 선택 요청
 
-### 조사 3단계
+### 2단계: 조건 간 인과관계 조사
+- 개별 조건 해결 후, 조건 사이의 연결고리를 조사
+- 이 단계를 건너뛰면 나열형 답변이 됩니다
 
-#### 1단계: 조건 분해 + 의존 관계
-질문에서 조건을 추출하고, 어떤 순서로 해결해야 하는지 파악합니다.
-- 원래 질문을 그대로 넘기지 마세요
-- 한 번에 하나의 구체적 질문만
+### 3단계: generate_answer 호출
+- 직접 답변하지 마세요. 반드시 generate_answer를 사용하세요
 
-#### 2단계: 조건 간 연결고리 조사 (핵심!)
-개별 조건을 해결한 후, 반드시 조건 사이의 인과관계를 조사하세요.
+## ask_user 사용 예시
 
-예: "반도체 산업이 발달한 국가 중 CAD 기술과 관련된 나라의 환경 문제"
-→ 개별 조건 해결 후, 반드시 이것도 조사:
-  - "CAD 기술이 반도체 산업에 미친 영향" (연결고리)
-  - "CAD 기반 반도체 설계가 환경에 미치는 영향" (인과관계)
+질문: "그 음식의 문제점이 뭘까?"
+→ ask_user("어떤 음식에 대해 알고 싶으신가요?", ["배달 음식", "패스트푸드", "인스턴트 식품"])
 
-이 단계를 건너뛰면 답변이 "나열형"이 됩니다.
+질문: "CAD 기술과 관련된 나라의 수도를 알려줘"
+→ research("CAD 기술 발전에 기여한 주요 국가") → 미국, 프랑스, 영국
+→ ask_user("어느 나라의 수도를 알고 싶으신가요?", ["미국", "프랑스", "영국", "모두"])
 
-#### 3단계: generate_answer 호출
-직접 답변하지 마세요. 반드시 generate_answer를 사용하세요.
+질문: "환경 문제에 대해 알려줘"
+→ ask_user("어떤 관점의 환경 문제가 궁금하신가요?", ["대기 오염", "수질 오염", "기후 변화", "특정 국가의 환경 문제"])
 
-### 예시: 교집합 + 인과 추론
-
-질문: "반도체 산업이 발달한 국가 중 CAD 기술과 관련된 나라의 환경 문제"
-
-Step 1: research("반도체 산업이 발달한 주요 국가")
-→ 한국, 대만, 미국, 일본, 중국
-
-Step 2: research("CAD 기술 발전에 기여한 주요 국가와 핵심 인물")
-→ 미국 (Ivan Sutherland - Sketchpad), 프랑스 (Dassault - CATIA)
-
-Step 3: 교집합 → 미국
-
-Step 4: research("CAD 기술이 반도체 산업 발전에 미친 구체적 영향")
-→ EDA(전자설계자동화), 칩 설계 자동화, 공정 미세화 가능
-
-Step 5: research("CAD 기반 반도체 설계 자동화가 야기한 환경 문제")
-→ 고집적 칩 → 화학공정 증가, 대량생산 → 전력/수자원 소비
-
-Step 6: research("미국의 반도체 산업 환경 문제")
-→ 구체적 사례
-
-Step 7: generate_answer(원래 질문, 모든 조사 결과)
-
-### 금지 사항
+## 금지 사항
+- 불필요한 보충 질문 금지 (명확한 질문에는 바로 조사)
 - 조건을 건너뛰거나 무시하지 마세요
-- 조건 간 연결고리 조사를 생략하지 마세요
 - 일반적인 나열형 답변을 만들지 마세요`
 
 export function createSupervisorReactAgent() {
   const llm = createLLM({ temperature: 0.3 })
   return createReactAgent({
     llm,
-    tools: [researchTool, generateAnswerTool, askUserTool],
+    tools: [askUserTool, researchTool, generateAnswerTool],
     prompt: SUPERVISOR_REACT_PROMPT,
     name: 'supervisor_react',
   })
