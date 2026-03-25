@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["agent/**/*", "tests/**/*", "vite.config.ts", "vitest.config.ts"]
+  "include": ["agent/**/*", "tests/**/*", "shared/**/*", "vite.config.ts", "vitest.config.ts"]
 }

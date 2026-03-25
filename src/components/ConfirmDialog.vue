@@ -49,7 +49,7 @@ defineEmits<{
 .confirm-icon { font-size: 2rem; margin-bottom: 8px; }
 .confirm-dialog h3 { margin: 0 0 12px; font-size: 1.1rem; }
 .action-name { font-weight: 600; margin: 4px 0; }
-.action-desc { color: #666; font-size: 0.9rem; margin: 4px 0 16px; }
+.action-desc { color: #666; font-size: 0.9rem; margin: 4px 0 16px; white-space: pre-line; text-align: left; }
 .confirm-actions { display: flex; gap: 12px; justify-content: center; }
 .btn-confirm, .btn-cancel {
   padding: 8px 24px;

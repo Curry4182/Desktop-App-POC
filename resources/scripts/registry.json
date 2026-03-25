@@ -13,7 +13,7 @@
       "id": "clear-dns-cache",
       "name": "DNS 캐시 초기화",
       "description": "DNS 캐시를 비우고 DNS 클라이언트 서비스를 재시작",
-      "file": "clear-dns-cache.ps1",
+      "file": "clear-dns-cache.bat",
       "platform": "windows",
       "symptoms": ["DNS 오류", "특정 사이트 접속 불가", "도메인 해석 실패"],
       "category": "network"

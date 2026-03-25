@@ -23,9 +23,6 @@
       </div>
     </div>
     <div class="input-area">
-      <div class="route-badge" v-if="chatStore.lastAgentName">
-        {{ agentLabel(chatStore.lastAgentName) }}
-      </div>
       <div class="input-row">
         <textarea
           v-model="inputText"
@@ -61,16 +58,6 @@ const lastMessageHasSteps = computed(() => {
   const last = chatStore.messages[chatStore.messages.length - 1]
   return last?.steps && last.steps.length > 0
 })
-
-const AGENT_LABELS = {
-  research: '자료조사',
-  pc_fix: 'PC 진단',
-  chat: '대화',
-}
-
-function agentLabel(name) {
-  return AGENT_LABELS[name] || name
-}
 
 function scrollToBottom() {
   if (messagesEl.value) {
@@ -160,18 +147,6 @@ watch(
   padding: 12px 24px 16px;
   background: #ffffff;
   flex-shrink: 0;
-}
-
-.route-badge {
-  font-size: 11px;
-  color: #002C5F;
-  font-weight: 600;
-  margin-bottom: 8px;
-  background: #e0e8f0;
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  letter-spacing: 0.02em;
 }
 
 .input-row {

@@ -11,7 +11,7 @@ import type {
   SystemInfo,
   InstalledProgram,
   DiagnosticResult,
-} from '../types.js'
+} from '../shared/types/system.js'
 
 const execAsync = promisify(exec)
 const dnsLookup = promisify(dns.lookup)

@@ -10,7 +10,6 @@
         </header>
         <main class="app-body">
           <ChatWindow />
-          <DiagnosticPanel v-if="chatStore.showDiagnosticPanel" />
         </main>
       </div>
     </div>
@@ -23,7 +22,6 @@
 
 <script setup>
 import ChatWindow from './components/ChatWindow.vue'
-import DiagnosticPanel from './components/DiagnosticPanel.vue'
 import SearchToggle from './components/SearchToggle.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useChatStore } from './stores/chat.js'

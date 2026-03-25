@@ -83,10 +83,13 @@ const showDetails = ref(false)
 const showSteps = ref(false)
 
 const NODE_LABELS = {
-  classifier: '분류',
-  research: '자료조사',
-  pc_fix: 'PC진단',
-  chat: '대화',
+  assistant: '응답',
+  router: '라우팅',
+  interpret: '질문 해석',
+  research_plan: '조사 계획',
+  research_distill: '결과 정리',
+  research_review: '보완 검토',
+  research_answer: '답변 작성',
   unknown: '기타',
 }
 
