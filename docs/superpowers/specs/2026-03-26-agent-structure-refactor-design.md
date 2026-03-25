@@ -60,8 +60,10 @@ agent/
 ├── package.json              # 기존 유지
 ├── state.ts                  # GraphAnnotation, 리듀서, DesignAssistantState
 ├── graph.ts                  # 그래프 빌드 + 컴파일 + 스트리밍 + public API
+├── clarify.ts                # requestClarification (interrupt 유틸리티)
 ├── nodes/
 │   ├── index.ts              # createCoreNodes 재조립
+│   ├── helpers.ts            # 공유 헬퍼 (getRecentMessages, withTurnContext 등)
 │   ├── interpret.ts          # createInterpretNode
 │   ├── router.ts             # createRouterNode
 │   ├── assistant.ts          # createAssistantNode
@@ -113,7 +115,7 @@ agent/
 현재 두 곳의 로직을 하나로:
 - `app/graph/runtime.ts` → `createDefaultGraphDependencies`, `buildGraph`, `compileGraph`, `createAgentRuntime`
 - 기존 `graph.ts` → public API export (`streamGraph`, `resumeGraph`)
-- `app/clarify.ts`의 `requestClarification` → 그래프 유틸리티로 포함
+- `app/clarify.ts` → `agent/clarify.ts`로 이동 (독립 유틸리티로 유지)
 
 ### `nodes/` (분리)
 
