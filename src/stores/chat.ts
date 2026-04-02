@@ -106,14 +106,16 @@ export const useChatStore = defineStore('chat', () => {
       const step = toStep(data)
       if (step) lastMsg.steps.push(step)
 
-      if (data.type === 'source_found' && data.title && data.url) {
+      if (data.type === 'source_found' && data.title) {
         if (!lastMsg.sources) lastMsg.sources = []
         if (!lastMsg.sources.some((source: { title: string }) => source.title === data.title)) {
           lastMsg.sources.push({
             title: data.title,
             content: data.snippet || '',
-            sourceType: 'wikipedia',
-            url: data.url,
+            sourceType: data.sourceType || 'other',
+            path: data.path || data.url,
+            documentId: data.documentId,
+            metadata: data.metadata,
           })
         }
       }

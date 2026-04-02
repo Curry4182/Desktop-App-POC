@@ -11,9 +11,18 @@
       </div>
       <div class="source-modal-footer">
         <div class="source-meta">
-          <span v-if="source.url" class="meta-item">
-            <span class="meta-label">URL</span>
-            <a :href="source.url" class="meta-link" target="_blank" rel="noopener">{{ source.url }}</a>
+          <span v-if="source.path" class="meta-item">
+            <span class="meta-label">경로</span>
+            <a
+              v-if="isLinkLike(source.path)"
+              :href="source.path"
+              class="meta-link"
+              target="_blank"
+              rel="noopener"
+            >
+              {{ source.path }}
+            </a>
+            <span v-else class="meta-value">{{ source.path }}</span>
           </span>
           <span v-if="source.documentId" class="meta-item">
             <span class="meta-label">문서 ID</span>
@@ -47,7 +56,7 @@ const props = defineProps<{
     title: string
     content: string
     sourceType: string
-    url?: string
+    path?: string
     documentId?: string
     lastUpdated?: string
     metadata?: Record<string, unknown>
@@ -57,14 +66,18 @@ const props = defineProps<{
 defineEmits<{ close: [] }>()
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
-  wikipedia: 'Wikipedia',
   internal: '사내 정보',
+  external: '외부 문서',
   other: '기타',
 }
 
 const sourceTypeLabel = computed(() =>
   props.source ? SOURCE_TYPE_LABELS[props.source.sourceType] || props.source.sourceType : ''
 )
+
+function isLinkLike(path: string) {
+  return /^https?:\/\//.test(path)
+}
 </script>
 
 <style scoped>
