@@ -1,3 +1,6 @@
+/**
+ * PC 진단 결과 타입 (OS, CPU, 메모리, GPU, 디스크, 네트워크).
+ */
 export interface OsInfo {
   platform: string
   distro: string

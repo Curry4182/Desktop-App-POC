@@ -39,7 +39,8 @@ agent/
 │   ├── graph/
 │   │   ├── runtime.ts               # 그래프 구성·컴파일·스트리밍 런타임
 │   │   ├── nodes.ts                 # 4개 핵심 노드 (interpret/router/assistant/research)
-│   │   └── schema.ts               # interpret/router structured output 스키마
+│   │   ├── schema.ts               # interpret/router structured output 스키마
+│   │   └── types.ts                # 그래프 의존성·입출력 타입 정의
 │   ├── prompts.ts                   # assistant 시스템 프롬프트
 │   └── clarify.ts                   # LangGraph interrupt 기반 clarification
 │
@@ -64,8 +65,7 @@ agent/
 └── shared/types/                     # 공유 타입
     ├── system.ts                    # PC 진단 결과 타입
     ├── scripts.ts                   # 스크립트 레지스트리 타입
-    ├── research.ts                  # 자료조사 소스 타입
-    └── llm.ts                       # LLM 옵션 타입
+    └── research.ts                  # 자료조사 소스 타입
 ```
 
 ## 그래프 흐름

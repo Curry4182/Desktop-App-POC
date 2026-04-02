@@ -1,3 +1,9 @@
+/**
+ * PC 시스템 진단 모듈.
+ *
+ * systeminformation 라이브러리를 사용하여 OS/CPU/메모리/GPU/디스크 정보를 수집하고,
+ * DNS/포트 연결 확인, 종합 진단 기능을 LangChain 도구로 제공한다.
+ */
 import fs from 'fs'
 import net from 'net'
 import { exec } from 'child_process'

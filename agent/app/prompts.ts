@@ -1,3 +1,6 @@
+/**
+ * 에이전트 노드별 시스템 프롬프트 정의.
+ */
 export const chatNodePrompt = `당신은 CAD 설계 엔지니어를 위한 Design Assistant입니다.
 설계 워크플로우, 소프트웨어 도구, 엔지니어링 프로세스, 일반 정보 조사, PC 문제 진단을 지원합니다.
 
