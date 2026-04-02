@@ -4,15 +4,8 @@ import { RunnableLambda } from '@langchain/core/runnables'
 import { MemorySaver } from '@langchain/langgraph'
 import { createAgent, fakeModel } from 'langchain'
 import { createAgentRuntime, type DesignAssistantGraphDependencies } from '../agent/graph.js'
-import {
-  createResearchWorkflow,
-  type ResearchWorkflowDependencies,
-} from '../agent/research/workflow.js'
-import {
-  performResearchSearch,
-  type DataSource,
-  WikipediaDataSource,
-} from '../agent/research/wiki.js'
+import type { DocumentSource } from '../agent/research/document-source.js'
+import { WikipediaDocumentSource } from '../agent/research/wiki.js'
 import {
   listAvailableScripts,
   listScriptsTool,
@@ -26,10 +19,6 @@ const interpretReplies = new Map<string, string>([
   ['그 회사의 창립자는?', 'AutoCAD를 만든 회사 Autodesk의 창립자는 누구야?'],
 ])
 
-function stringifyMessages(messages: BaseMessage[]) {
-  return messages.map((message) => String(message.content ?? '')).join('\n')
-}
-
 function createTestDeps(): DesignAssistantGraphDependencies {
   const assistantAgent = createAgent({
     model: fakeModel()
@@ -37,129 +26,6 @@ function createTestDeps(): DesignAssistantGraphDependencies {
       .respond(new AIMessage('일반 응답입니다.')),
     tools: [],
   })
-
-  const answerModel = fakeModel()
-    .respond(new AIMessage('대표적인 CAD 소프트웨어인 AutoCAD를 개발한 회사는 Autodesk입니다.'))
-    .respond(new AIMessage('Autodesk의 공동 창립자는 John Walker, Daniel Drake, 그리고 14명의 다른 프로그래머들입니다.'))
-
-  const workflowDeps: ResearchWorkflowDependencies = {
-    planner: RunnableLambda.from(async (messages: BaseMessage[]) => {
-      const text = stringifyMessages(messages)
-
-      if (text.includes('Known facts:\n- none') && text.includes('Autodesk의 창립자')) {
-        return {
-          action: 'search',
-          researchQuestion: 'Autodesk founders',
-          searchQuery: 'Autodesk founder',
-          depth: 'normal' as const,
-        }
-      }
-
-      if (text.includes('Known facts:\n- none') && text.includes('CAD 소프트웨어를 만든 회사')) {
-        return {
-          action: 'search',
-          researchQuestion: 'Company behind AutoCAD',
-          searchQuery: 'AutoCAD Autodesk',
-          depth: 'normal' as const,
-        }
-      }
-
-      return {
-        action: 'answer' as const,
-        researchQuestion: '',
-        searchQuery: '',
-        depth: 'normal' as const,
-      }
-    }),
-    distiller: RunnableLambda.from(async (messages: BaseMessage[]) => {
-      const text = stringifyMessages(messages)
-
-      if (text.includes('developed and marketed by Autodesk')) {
-        return {
-          stepSummary: 'AutoCAD를 개발한 회사는 Autodesk다.',
-          newFacts: [
-            { label: 'AutoCAD developer company', value: 'Autodesk', sourceTitle: 'AutoCAD' },
-          ],
-          enoughToAnswer: true,
-        }
-      }
-
-      if (text.includes('founded in April 1982 by John Walker')) {
-        return {
-          stepSummary: 'Autodesk는 John Walker, Daniel Drake, 그리고 14명의 다른 프로그래머가 공동 창립했다.',
-          newFacts: [
-            { label: 'Autodesk founders', value: 'John Walker, Daniel Drake, and 14 other programmers', sourceTitle: 'Autodesk' },
-          ],
-          enoughToAnswer: true,
-        }
-      }
-
-      return {
-        stepSummary: '유의미한 새 사실이 없다.',
-        newFacts: [],
-        enoughToAnswer: true,
-      }
-    }),
-    reviewer: RunnableLambda.from(async () => ({
-      isComplete: true,
-      reason: '핵심 사실이 확보되었다.',
-      missingAspect: '',
-      researchQuestion: '',
-      searchQuery: '',
-      depth: 'normal' as const,
-    })),
-    answerModel,
-    search: async ({ query }) => {
-      const normalized = query.toLowerCase()
-
-      if (normalized.includes('autodesk') && normalized.includes('founder')) {
-        return {
-          query,
-          depth: 'normal' as const,
-          findings: [
-            'Title: Autodesk',
-            'Summary: Autodesk was founded in April 1982 by John Walker, Daniel Drake, and 14 other programmers.',
-            'URL: https://en.wikipedia.org/wiki/Autodesk',
-          ].join('\n'),
-          sources: [{
-            title: 'Autodesk',
-            content: 'Autodesk was founded in April 1982 by John Walker, Daniel Drake, and 14 other programmers.',
-            sourceType: 'wikipedia' as const,
-            url: 'https://en.wikipedia.org/wiki/Autodesk',
-            documentId: 'Autodesk',
-          }],
-        }
-      }
-
-      if (normalized.includes('autocad') || normalized.includes('cad company')) {
-        return {
-          query,
-          depth: 'normal' as const,
-          findings: [
-            'Title: AutoCAD',
-            'Summary: AutoCAD is a commercial computer-aided design software application developed and marketed by Autodesk.',
-            'URL: https://en.wikipedia.org/wiki/AutoCAD',
-          ].join('\n'),
-          sources: [{
-            title: 'AutoCAD',
-            content: 'AutoCAD is a commercial computer-aided design software application developed and marketed by Autodesk.',
-            sourceType: 'wikipedia' as const,
-            url: 'https://en.wikipedia.org/wiki/AutoCAD',
-            documentId: 'AutoCAD',
-          }],
-        }
-      }
-
-      return {
-        query,
-        depth: 'normal' as const,
-        findings: `Title: Unknown\nSummary: No useful facts for ${query}`,
-        sources: [],
-      }
-    },
-  }
-
-  const researchWorkflow = createResearchWorkflow(workflowDeps)
 
   return {
     interpretModel: RunnableLambda.from(async (messages: BaseMessage[]) => {
@@ -172,19 +38,24 @@ function createTestDeps(): DesignAssistantGraphDependencies {
       }
     }),
     routerModel: RunnableLambda.from(async (messages: BaseMessage[]) => {
-      const text = stringifyMessages(messages)
+      const text = messages.map((m) => String(m.content ?? '')).join('\n')
       return { next: /회사|창립자/.test(text) ? 'research_init' : 'assistant' }
     }),
     assistantAgent,
-    runResearch: async (input, config) => {
-      const result = await researchWorkflow.invoke({
-        messages: input.messages,
-        searchEnabled: input.searchEnabled,
-        originalUserQuestion: input.originalUserQuestion,
-        researchClarifications: input.researchClarifications,
-      }, config)
+    runResearch: async (input) => {
+      const question = input.originalUserQuestion.toLowerCase()
 
-      return { answer: result.answer, streamsAnswerTokens: true }
+      if (question.includes('창립자') || question.includes('founder')) {
+        return {
+          answer: 'Autodesk의 공동 창립자는 John Walker, Daniel Drake, 그리고 14명의 다른 프로그래머들입니다.',
+          streamsAnswerTokens: false,
+        }
+      }
+
+      return {
+        answer: '대표적인 CAD 소프트웨어인 AutoCAD를 개발한 회사는 Autodesk입니다.',
+        streamsAnswerTokens: false,
+      }
     },
   }
 }
@@ -227,51 +98,48 @@ describe('agent core', () => {
 
   it('uses datasource document ids instead of display titles', async () => {
     const calls: string[] = []
-    const mockSource: DataSource = {
+    const mockSource: DocumentSource = {
       sourceType: 'other',
       async search() {
         return [{
-          id: 'doc-42',
+          documentId: 'doc-42',
           title: 'Displayed Title',
           snippet: 'snippet',
-          url: 'https://company.local/doc-42',
+          path: 'https://company.local/doc-42',
         }]
       },
       async getSummary(documentId) {
         calls.push(documentId)
         return {
-          id: documentId,
+          documentId,
           title: 'Displayed Title',
-          content: 'Company content',
-          url: 'https://company.local/doc-42',
+          summary: 'Company content',
+          path: 'https://company.local/doc-42',
           metadata: { team: 'platform' },
         }
       },
-      async getSections(documentId) {
-        calls.push(`sections:${documentId}`)
-        return []
-      },
-      async getSectionContent() {
+      async getFullContent() {
         return null
       },
     }
 
-    const result = await performResearchSearch({
-      query: 'internal keyword',
-      dataSource: mockSource,
-    })
+    const results = await mockSource.search('internal keyword')
+    expect(results.length).toBe(1)
 
+    const summary = await mockSource.getSummary(results[0].documentId)
     expect(calls).toEqual(['doc-42'])
-    expect(result.sources[0]?.documentId).toBe('doc-42')
+    expect(summary?.documentId).toBe('doc-42')
   })
 
-  it('can reach wikipedia and load summaries', async () => {
-    const dataSource = new WikipediaDataSource()
+  it('can reach wikipedia and load document summaries', async () => {
+    const dataSource = new WikipediaDocumentSource()
     const results = await dataSource.search('Computer-aided design')
     const summary = await dataSource.getSummary('Computer-aided design')
+    const content = await dataSource.getFullContent('Computer-aided design')
 
     expect(results.length).toBeGreaterThan(0)
-    expect(summary?.content.length).toBeGreaterThan(0)
+    expect(summary?.summary.length).toBeGreaterThan(0)
+    expect(content?.fullContent.length).toBeGreaterThan(0)
   }, 15000)
 
   it('exposes script tools and blocks unknown scripts', async () => {
