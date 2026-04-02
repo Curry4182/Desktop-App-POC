@@ -7,7 +7,8 @@
       "file": "fix-network.bat",
       "platform": "windows",
       "symptoms": ["인터넷 연결 안 됨", "DNS 오류", "네트워크 느림"],
-      "category": "network"
+      "category": "network",
+      "requiresAdmin": true
     },
     {
       "id": "clear-dns-cache",
@@ -16,7 +17,8 @@
       "file": "clear-dns-cache.bat",
       "platform": "windows",
       "symptoms": ["DNS 오류", "특정 사이트 접속 불가", "도메인 해석 실패"],
-      "category": "network"
+      "category": "network",
+      "requiresAdmin": true
     },
     {
       "id": "clear-temp",
@@ -25,7 +27,8 @@
       "file": "clear-temp-files.bat",
       "platform": "windows",
       "symptoms": ["디스크 용량 부족", "PC 느림", "저장 공간 부족"],
-      "category": "storage"
+      "category": "storage",
+      "requiresAdmin": true
     }
   ]
 }

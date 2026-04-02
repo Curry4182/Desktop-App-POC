@@ -82,7 +82,8 @@ export function formatScriptMetadata(scriptId: string) {
     `카테고리: ${entry.category}`,
     `증상: ${entry.symptoms.join(', ')}`,
     `파일: ${entry.file}`,
-  ].join('\n')
+    entry.requiresAdmin ? '⚠️ 관리자 권한 필요' : null,
+  ].filter(Boolean).join('\n')
 }
 
 export function resolveScriptPath(entry: ScriptEntry) {
@@ -147,8 +148,9 @@ export const listScriptsTool = tool(
   async () => {
     const scripts = listAvailableScripts()
     return JSON.stringify(
-      scripts.map(({ id, name, description, symptoms, category }) => ({
+      scripts.map(({ id, name, description, symptoms, category, requiresAdmin }) => ({
         id, name, description, symptoms, category,
+        ...(requiresAdmin ? { requiresAdmin } : {}),
       })),
       null, 2,
     )

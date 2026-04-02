@@ -182,43 +182,85 @@ Electron main이 하는 일:
 
 ## 윈도우 배치 스크립트
 
+### 동작 흐름
+
+사용자가 PC 문제를 설명하면 assistant 에이전트가 자동으로 스크립트를 찾아 실행을 제안합니다.
+
+```text
+사용자: "인터넷이 안 돼요"
+  → assistant 에이전트가 list_scripts 도구 호출
+  → registry.json의 symptoms 필드와 사용자 증상 매칭
+  → run_script("fix-network") 호출
+  → Human-in-the-loop: 사용자에게 승인 UI 표시
+  → 승인 시 cmd /c "fix-network.bat" 실행
+  → 결과를 사용자에게 안내
+```
+
+에이전트가 직접 판단하므로 사용자가 스크립트 ID를 알 필요는 없습니다. "PC가 느려요", "DNS 오류가 나요" 같은 자연어로 말하면 됩니다.
+
 ### 등록 위치
 
-배치 파일은 아래 두 곳으로 구성됩니다.
-
-- 실제 실행 파일: `resources/scripts/*.bat`
+- 실행 파일: `resources/scripts/*.bat`
 - 메타 정보: `resources/scripts/registry.json`
 
-현재 registry 필드:
+### 스크립트 추가 방법
 
-- `id`, `name`, `description`, `file`, `platform`, `symptoms`, `category`
-
-예시:
+1. `resources/scripts/`에 `.bat` 또는 `.cmd` 파일 추가
+2. `resources/scripts/registry.json`의 `scripts` 배열에 항목 추가
 
 ```json
 {
-  "id": "fix-network",
-  "name": "네트워크 초기화",
-  "description": "DNS 캐시 초기화 및 네트워크 어댑터 재시작",
-  "file": "fix-network.bat",
+  "id": "fix-gpu-driver",
+  "name": "GPU 드라이버 재설치",
+  "description": "GPU 드라이버를 제거하고 기본 드라이버로 복구",
+  "file": "fix-gpu-driver.bat",
   "platform": "windows",
-  "symptoms": ["인터넷 연결 안 됨", "DNS 오류"],
-  "category": "network"
+  "symptoms": ["화면 깜빡임", "GPU 드라이버 오류", "블루스크린"],
+  "category": "graphics",
+  "requiresAdmin": true
 }
+```
+
+| 필드 | 설명 |
+|------|------|
+| `id` | 고유 식별자 (영문 kebab-case) |
+| `name` | 사용자에게 보여줄 스크립트 이름 |
+| `description` | 스크립트가 하는 일 설명 |
+| `file` | 실행할 파일명 (`resources/scripts/` 기준) |
+| `platform` | `windows` / `macos` / `linux` |
+| `symptoms` | 이 스크립트로 해결 가능한 증상 목록 (에이전트가 매칭에 사용) |
+| `category` | 분류 (`network`, `storage`, `graphics` 등) |
+| `requiresAdmin` | `true`면 관리자 권한 필요 표시 + bat 자가 승격 (선택) |
+
+`symptoms`가 구체적일수록 에이전트가 정확하게 매칭합니다.
+
+관리자 권한이 필요한 스크립트는 bat 파일 상단에 아래 자가 승격 코드를 넣어야 합니다. 실행 시 Windows UAC "이 앱이 변경하는 것을 허용하시겠습니까?" 팝업이 표시됩니다.
+
+```bat
+@echo off
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Requesting administrator privileges...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
 ```
 
 ### 실행 방식
 
-- 윈도우에서는 `.bat` / `.cmd`만 실행
-- PowerShell `.ps1` 실행은 지원하지 않음
-- 실행은 `cmd /c` 기반
-- 패키징된 앱에서도 실행되도록 `electron-builder.extraResources`로 `resources/scripts`를 `process.resourcesPath/scripts`에 복사
+- `.bat` / `.cmd`만 실행 가능 (PowerShell `.ps1`은 지원하지 않음)
+- 실행은 `cmd /c` 기반, 타임아웃 30초
+- 패키징 시 `electron-builder.extraResources`로 `resources/scripts`를 `process.resourcesPath/scripts`에 복사
+- 현재 플랫폼과 `platform` 필드가 일치하는 스크립트만 목록에 노출
 
 ### 승인 UI
 
-스크립트 실행 전 사용자 확인 창에 아래 정보가 표시됩니다.
+스크립트 실행 전 Human-in-the-loop 확인 창에 아래 정보가 표시됩니다.
 
 - 스크립트 이름, 설명, 카테고리, 증상, 파일명
+- `requiresAdmin: true`인 경우 "이 스크립트는 관리자 권한이 필요합니다" 안내 추가 표시
+
+사용자가 승인하면 스크립트가 실행되고, `requiresAdmin` 스크립트는 Windows UAC 팝업이 한 번 더 뜹니다. 임의 명령 실행은 불가하며, registry.json에 등록된 스크립트만 실행할 수 있습니다.
 
 ## 환경 변수
 

@@ -29,7 +29,7 @@ import {
   networkCheckTool,
   systemInfoTool,
 } from './diagnostics.js'
-import { formatScriptMetadata, listScriptsTool, scriptRunnerTool } from './scripts.js'
+import { formatScriptMetadata, getScriptById, listScriptsTool, scriptRunnerTool } from './scripts.js'
 
 /** 기본 어시스턴트 에이전트를 생성한다 */
 export function createDefaultAssistantAgent(): AssistantAgentLike {
@@ -77,8 +77,12 @@ ${searchMode}`
               const metadata = typeof toolCall.args?.scriptId === 'string'
                 ? formatScriptMetadata(toolCall.args.scriptId)
                 : null
+              const entry = typeof toolCall.args?.scriptId === 'string'
+                ? getScriptById(toolCall.args.scriptId)
+                : null
               return [
                 '등록된 수정 스크립트 실행 요청',
+                entry?.requiresAdmin ? '⚠️ 이 스크립트는 관리자 권한이 필요합니다. 실행 시 Windows UAC 확인 창이 표시됩니다.' : null,
                 '',
                 `scriptId: ${scriptId}`,
                 metadata,

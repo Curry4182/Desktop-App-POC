@@ -9,6 +9,7 @@ export interface ScriptEntry {
   platform: 'windows' | 'macos' | 'linux'
   symptoms: string[]
   category: string
+  requiresAdmin?: boolean
 }
 
 export interface ScriptRegistry {
