@@ -1,8 +1,8 @@
 export interface ResearchSource {
   title: string
   content: string
-  sourceType: 'wikipedia' | 'other'
-  url?: string
+  sourceType: 'internal' | 'external' | 'other'
+  path?: string
   documentId?: string
   author?: string
   lastUpdated?: string
