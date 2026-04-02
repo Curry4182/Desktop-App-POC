@@ -1,16 +1,8 @@
-import 'dotenv/config'
-
-function isTracingConfigured(): boolean {
-  return false
-}
-
+/**
+ * 트레이싱 팩토리.
+ * OpenTelemetry 설정이 구성되면 여기서 tracer를 반환한다.
+ * 현재는 비활성화 상태.
+ */
 export async function createTracer() {
-  // Langfuse evals are run explicitly through experiment.run().
-  // Detailed trace export requires OpenTelemetry setup, so keep the
-  // default runtime tracer disabled until that is configured.
-  if (!isTracingConfigured()) {
-    return null
-  }
-
   return null
 }

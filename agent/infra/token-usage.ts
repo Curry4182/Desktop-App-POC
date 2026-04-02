@@ -1,3 +1,10 @@
+/**
+ * 토큰 사용량 추적 모듈.
+ *
+ * LangChain 콜백 핸들러로 동작하며, LLM 호출마다
+ * metadata.token_usage_scope(노드명)별로 input/output 토큰을 누적한다.
+ * 턴 완료 시 snapshot()으로 노드별 사용량을 조회할 수 있다.
+ */
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import type { BaseMessage } from '@langchain/core/messages'
 import type { LLMResult } from '@langchain/core/outputs'
@@ -10,49 +17,24 @@ export type TokenUsageSummary = {
 
 export type TokenUsageByNode = Record<string, TokenUsageSummary>
 
-type ProviderTokenUsage = {
-  promptTokens?: number
-  completionTokens?: number
-  totalTokens?: number
-}
-
-type UsageMetadata = {
-  input_tokens?: number
-  output_tokens?: number
-  total_tokens?: number
-}
-
-function normalizeUsage(usage: ProviderTokenUsage | UsageMetadata | null | undefined): TokenUsageSummary | null {
+/** OpenAI/Anthropic 양쪽 형식의 토큰 사용량을 통합 추출한다 (duck typing) */
+function normalizeUsage(usage: any): TokenUsageSummary | null {
   if (!usage) return null
 
-  const providerUsage = usage as ProviderTokenUsage
-  const metadataUsage = usage as UsageMetadata
-
-  const input = providerUsage.promptTokens ?? metadataUsage.input_tokens ?? 0
-  const output = providerUsage.completionTokens ?? metadataUsage.output_tokens ?? 0
-  const total = providerUsage.totalTokens ?? metadataUsage.total_tokens ?? input + output
+  const input = usage.promptTokens ?? usage.input_tokens ?? 0
+  const output = usage.completionTokens ?? usage.output_tokens ?? 0
+  const total = usage.totalTokens ?? usage.total_tokens ?? input + output
 
   if (input === 0 && output === 0 && total === 0) return null
   return { input, output, total }
 }
 
-function extractUsageFromMessage(message: BaseMessage | undefined): TokenUsageSummary | null {
-  if (!message || typeof message !== 'object') return null
-  const usage = (message as BaseMessage & { usage_metadata?: UsageMetadata }).usage_metadata
-  return normalizeUsage(usage)
-}
-
 function extractUsage(output: LLMResult): TokenUsageSummary | null {
-  const llmOutputUsage = normalizeUsage((output.llmOutput as { tokenUsage?: ProviderTokenUsage } | undefined)?.tokenUsage)
-  if (llmOutputUsage) return llmOutputUsage
+  const llmUsage = normalizeUsage((output.llmOutput as any)?.tokenUsage)
+  if (llmUsage) return llmUsage
 
-  for (const generationList of output.generations ?? []) {
-    const firstGeneration = generationList?.[0] as { message?: BaseMessage } | undefined
-    const messageUsage = extractUsageFromMessage(firstGeneration?.message)
-    if (messageUsage) return messageUsage
-  }
-
-  return null
+  const firstGen = output.generations?.[0]?.[0] as any
+  return normalizeUsage(firstGen?.message?.usage_metadata)
 }
 
 function mergeUsage(current: TokenUsageSummary | undefined, next: TokenUsageSummary): TokenUsageSummary {
@@ -64,6 +46,11 @@ function mergeUsage(current: TokenUsageSummary | undefined, next: TokenUsageSumm
   }
 }
 
+/**
+ * LLM 호출의 토큰 사용량을 노드(scope)별로 수집하는 콜백 핸들러.
+ * handleChatModelStart에서 scope를 기록하고,
+ * handleLLMEnd에서 실제 사용량을 추출하여 누적한다.
+ */
 export class TokenUsageCollector extends BaseCallbackHandler {
   name = 'token_usage_collector'
 

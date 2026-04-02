@@ -1,18 +1,18 @@
-import type { AIMessageChunk, BaseMessage } from '@langchain/core/messages'
+/**
+ * 에이전트 런타임 타입 정의.
+ *
+ * 그래프 노드와 의존성 간의 계약(contract)을 정의하여
+ * 테스트 시 모킹과 의존성 주입을 용이하게 한다.
+ */
+import type { BaseMessage } from '@langchain/core/messages'
 import type { LangGraphRunnableConfig } from '@langchain/langgraph'
-import type { ResearchSearchResult } from '../research/wiki.js'
 
+/** structured output을 반환하는 LLM 인터페이스 (interpret, router 등에서 사용) */
 export type StructuredModel<T> = {
   invoke(input: BaseMessage[], config?: LangGraphRunnableConfig): Promise<T>
 }
 
-export type StreamingModel = {
-  stream(
-    input: BaseMessage[],
-    config?: LangGraphRunnableConfig,
-  ): Promise<AsyncIterable<AIMessageChunk>> | AsyncIterable<AIMessageChunk>
-}
-
+/** ReAct 에이전트 인터페이스 (assistant, research agentic 모드에서 사용) */
 export type AssistantAgentLike = {
   invoke(
     input: { messages: BaseMessage[] },
@@ -37,12 +37,3 @@ export type RunResearchFn = (
   input: ResearchInput,
   config?: LangGraphRunnableConfig,
 ) => Promise<ResearchResult>
-
-export type ResearchSearchFn = (args: {
-  query: string
-  depth?: 'normal' | 'deep'
-  searchEnabled?: boolean
-  writer?: LangGraphRunnableConfig['writer']
-}) => Promise<ResearchSearchResult>
-
-export type TracerFactory = () => Promise<unknown> | unknown
