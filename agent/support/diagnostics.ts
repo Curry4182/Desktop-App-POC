@@ -59,7 +59,7 @@ export async function getSystemInfo(): Promise<SystemInfo> {
       vendor: c.vendor,
       model: c.model,
       vramMB: c.vram ?? 0,
-      driverVersion: c.driverVersion || undefined,
+      driverVersion: c.driverVersion,
     })),
     disks: diskData.map((d) => ({
       fs: d.fs,
@@ -137,21 +137,20 @@ export async function getInstalledPrograms(): Promise<InstalledProgram[]> {
 /**
  * 파일 경로 존재 여부 확인
  */
-export async function checkFilePaths(
+async function checkFilePaths(
   paths: string[],
 ): Promise<Record<string, FilePathResult>> {
   const results: Record<string, FilePathResult> = {}
   for (const p of paths) {
     try {
-      const stat = fs.existsSync(p) ? fs.statSync(p) : null
-      results[p] = {
-        exists: !!stat,
-        isFile: stat?.isFile() ?? false,
-        isDirectory: stat?.isDirectory() ?? false,
+      if (fs.existsSync(p)) {
+        const stat = fs.statSync(p)
+        results[p] = { exists: true, isFile: stat.isFile(), isDirectory: stat.isDirectory() }
+      } else {
+        results[p] = { exists: false }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      results[p] = { exists: false, error: message }
+      results[p] = { exists: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
   return results
@@ -204,7 +203,7 @@ async function checkPort(host: string, port: number, timeout = 3000): Promise<bo
 /**
  * 오케스트레이터: specificPaths가 있을 때만 filePaths 포함
  */
-export async function runDiagnostics(
+async function runDiagnostics(
   userQuery = '',
   specificPaths?: string[],
 ): Promise<DiagnosticResult> {
@@ -248,28 +247,24 @@ export async function runDiagnostics(
 import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 
-export const systemInfoTool = tool(
-  async () => {
-    const info = await getSystemInfo()
-    return JSON.stringify(info, null, 2)
-  },
-  {
-    name: 'get_system_info',
-    description: 'Get detailed PC system information including OS, CPU, memory, GPU, and disk usage.',
-    schema: z.object({}),
-  }
+/** 인자 없이 JSON을 반환하는 단순 진단 도구를 생성한다 */
+function createJsonTool<T>(fn: () => Promise<T>, name: string, description: string) {
+  return tool(
+    async () => JSON.stringify(await fn(), null, 2),
+    { name, description, schema: z.object({}) },
+  )
+}
+
+export const systemInfoTool = createJsonTool(
+  getSystemInfo,
+  'get_system_info',
+  'Get detailed PC system information including OS, CPU, memory, GPU, and disk usage.',
 )
 
-export const installedProgramsTool = tool(
-  async () => {
-    const programs = await getInstalledPrograms()
-    return JSON.stringify(programs, null, 2)
-  },
-  {
-    name: 'get_installed_programs',
-    description: 'List all installed programs/applications on the PC.',
-    schema: z.object({}),
-  }
+export const installedProgramsTool = createJsonTool(
+  getInstalledPrograms,
+  'get_installed_programs',
+  'List all installed programs/applications on the PC.',
 )
 
 export const networkCheckTool = tool(
@@ -281,8 +276,7 @@ export const networkCheckTool = tool(
       }
       return t
     })
-    const results = await checkNetwork(parsedTargets)
-    return JSON.stringify(results, null, 2)
+    return JSON.stringify(await checkNetwork(parsedTargets), null, 2)
   },
   {
     name: 'check_network',
@@ -290,19 +284,16 @@ export const networkCheckTool = tool(
     schema: z.object({
       targets: z.array(z.string()).describe('List of hosts to check, optionally with port (e.g., "google.com", "8.8.8.8:53")'),
     }),
-  }
+  },
 )
 
 export const fullDiagnosticTool = tool(
-  async ({ query }) => {
-    const result = await runDiagnostics(query)
-    return JSON.stringify(result, null, 2)
-  },
+  async ({ query }) => JSON.stringify(await runDiagnostics(query), null, 2),
   {
     name: 'run_full_diagnostic',
     description: 'Run a comprehensive PC diagnostic including system info, installed programs, and network checks. Use this when the user reports a general PC problem.',
     schema: z.object({
       query: z.string().describe('The user symptom or question that triggered this diagnostic'),
     }),
-  }
+  },
 )
